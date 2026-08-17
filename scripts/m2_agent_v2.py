@@ -40,7 +40,8 @@ SKILL1_THROTTLE_S = 1.5       # 1 技能节流
 SUMMONER_THROTTLE_S = 30.0    # 召唤师技能节流（CD 较长）
 SKILL3_ACTIVE_S = 3.5         # 大招生效期：三技能释放后 3.5s 内不释放一技能
 SKILL_DEBOUNCE_S = 0.05       # 技能释放后防抖：不重复移动
-SKILL2_RANGE_FRAC = 0.42      # 二技能（钩子）范围（相对屏宽）【待用户校准】
+SKILL2_RANGE_FRAC = 0.28      # 二技能（钩子）范围（屏宽比例；由 measure_hook 实测标定 ≈0.30）
+HOOK_FLIGHT_S = 0.5           # 钩子飞行期：释放后 0.5s 内停止移动（等勾中结果，防自己走近误判）
 NEAR_FRAC = 0.25              # 一技能"身边"阈值（敌人或敌兵 < 0.25 屏宽）
 HOOK_CONFIRM_S = 1.0          # 勾中确认窗：二技能释放后 1s 内判定
 HOOK_DIST_SHRINK = 0.72       # 勾中判据：敌人距离缩小到释放时的 72% 以下
@@ -107,14 +108,15 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     def ready(key, thr):
         return now - float(cooldowns.get(key, 0.0)) > thr
 
-    # ---- 0) 勾中连招：二技能释放后窗口内，敌人距离显著缩小 = 勾到了 ----
+    # ---- 0) 勾中连招：二技能释放后窗口内，敌人被"拉近" = 勾到了 ----
     hook_pending = float(cooldowns.get("hook_pending", 0.0))
     if hook_pending > 0 and now - hook_pending <= HOOK_CONFIRM_S:
         anchor = float(cooldowns.get("hook_anchor_dist", 0.0))
         ne = nearest(enemies)
         if ne is not None and anchor > 0:
             d = dist_width(ne[0], ne[1])
-            if d < anchor * HOOK_DIST_SHRINK:
+            # 勾中判据：距离显著缩小（相对+绝对），钩子飞行期 Agent 静止，缩小只能来自钩子
+            if d < anchor * HOOK_DIST_SHRINK and (anchor - d) > 0.12:
                 cooldowns["hook_pending"] = 0.0
                 combo = []
                 if ready("summoner_t", SUMMONER_THROTTLE_S):
@@ -192,6 +194,9 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 reason = "lane_develop"
     if target is None:
         return {"type": "none", "reason": "no_target"}
+    # 钩子飞行期停止移动（等勾中结果，防自己走近误判连招）
+    if now - float(cooldowns.get("skill2_t", 0.0)) < HOOK_FLIGHT_S:
+        return {"type": "none", "reason": "hook_flight"}
     theta = math.atan2(-(target[1] - 0.5) * aspect, target[0] - 0.5)
     # 塔规避：若移动方向朝向威胁塔，偏转远离（不进塔范围）
     if turret_threat and cooldowns.get("turret_threat"):
