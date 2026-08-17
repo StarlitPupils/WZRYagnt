@@ -24,8 +24,9 @@
 > - ✅ **数据扩充与阵营预判**：录像抽帧 +150 帧/377 框（数据集 367 图/1317 框）；`camp_autolabel.py`（血条颜色判定，216 个高置信 ally 建议 + 联系表抽查）。
 > - ✅ **数据泄漏修复**：prepare_dataset 多次运行导致 train/val 重叠（237 个重复框键）——重建后归零，验证指标可信。
 > - ✅ **11 类全量训练**（80 轮，含 ally 类数据）：整体 **mAP50=0.633**（40 轮 0.511 → +0.12）；enemy_hero 0.857 / ally_hero 0.593 / ally_minion 0.499 / ally_turret 0.658 / enemy_turret 0.747 / hook_aim 0.537。正式版：`runs/detect/zhongkui_11cls/weights/best.pt`。⚠️ 训练时模拟器需空闲（对局渲染抢 GPU 会卡死）。
-> - ✅ **真局验证两轮**（用户配合）：小地图真局稳定（蓝/红/黄点检出）、11 类模型真局检出（minion/turret/hero/ally_turret）、技能冷却 dark_frac 基准（~0.3 就绪/~0.5 冷却）、HP 血条检测修复（水平条结构+放宽阈值，真局验证满血 1.0）。
-> - ⏳ 待办：补标空类（水晶×2/野怪/skill_effect，见 docs/ANNOTATION_GUIDE.md）；新模型最终真局验证；UI 阈值终标定；真人局验证。
+> - ✅ **真局验证三轮**（用户配合）：小地图真局稳定、11 类模型真局检出、技能冷却 dark_frac 基准、HP 血条定位修复（左下角搜索区，真局 17 帧检出 88%）。
+> - ✅ **真实 BC 数据链路验证**：真实会话（357 样本/2 会话）→ bc_multi.npz；BCNet 真实数据训练链路跑通（loss 收敛）。⚠️ 被动采集会话动作全为 none，**带动作标签的 BC 数据需 Agent v2 --action 模式采集或录像反推**（M3 进行中）。
+> - ⏳ 待办：补标空类（水晶×2/野怪/skill_effect，见 docs/ANNOTATION_GUIDE.md）；UI 阈值终标定；真人局验证。
 
 ---
 
