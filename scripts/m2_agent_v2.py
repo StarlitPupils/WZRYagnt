@@ -59,6 +59,7 @@ DANGER_FRAC = 0.50            # 身边有危险：敌方英雄/兵 < 0.5 屏宽
 RECALL_THROTTLE_S = 20.0      # 回城节流（避免反复点）
 # 塔规避：屏幕存在敌方塔且无我方小兵时，移动方向朝塔则偏转远离
 TURRET_SAFE_FRAC = 0.55       # 塔在屏幕内时与移动目标方向冲突判定阈值
+TURRET_THREAT_FRAC = 0.45     # 塔威胁距离：塔中心距屏幕中心 < 0.45 屏宽才算威胁
 
 
 def _debounced(action: dict, now: float, cooldowns: dict) -> dict:
@@ -152,12 +153,13 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 "r": 1.0, "duration_ms": MOVE_DURATION_MS,
                 "reason": "retreat_low_hp"}
 
-    # ---- 1) 塔规避：敌塔可见且无我方小兵(ally_minion) → 不进入塔攻击范围 ----
-    turret_threat = bool(turrets) and not ally_minions
+    # ---- 1) 塔规避：敌方塔在近处可见且无我方小兵(ally_minion) → 不进入塔攻击范围 ----
+    nt = nearest(turrets)
+    turret_threat = bool(turrets) and not ally_minions and nt is not None \
+        and dist_width(nt[0], nt[1]) < TURRET_THREAT_FRAC
     if turret_threat:
         ne = nearest(enemies)
-        nt = nearest(turrets)
-        if ne is None and nt is not None:
+        if ne is None:
             # 无敌人时也不朝塔方向走（朝远离塔方向）
             tx, ty = nt[0], nt[1]
             away_theta = math.atan2(-(ty - 0.5) * aspect, -(tx - 0.5))
@@ -236,17 +238,17 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     if now - float(cooldowns.get("skill2_t", 0.0)) < HOOK_FLIGHT_S:
         return {"type": "none", "reason": "hook_flight"}
     theta = math.atan2(-(target[1] - 0.5) * aspect, target[0] - 0.5)
-    # 塔规避：若移动方向朝向威胁塔，偏转远离（不进塔范围）
+    # 塔规避：若移动方向朝向威胁塔，垂直绕行（比反向更平滑，减少摆动）
     if turret_threat and cooldowns.get("turret_threat"):
-        nt = nearest(turrets)
-        if nt is not None:
-            tx, ty = nt[0], nt[1]
-            t_theta = math.atan2(-(ty - 0.5) * aspect, tx - 0.5)
-            diff = abs(((theta - t_theta + math.pi) % (2 * math.pi)) - math.pi)
-            if diff < math.pi / 4:  # 目标方向与塔同向
-                away = math.atan2(-(ty - 0.5) * aspect, -(tx - 0.5))
-                return {"type": "move", "theta": away, "r": MOVE_R,
-                        "duration_ms": MOVE_DURATION_MS, "reason": "avoid_turret"}
+        tx, ty = nt[0], nt[1]
+        t_theta = math.atan2(-(ty - 0.5) * aspect, tx - 0.5)
+        diff = abs(((theta - t_theta + math.pi) % (2 * math.pi)) - math.pi)
+        if diff < math.pi / 4:  # 目标方向与塔同向 -> 垂直绕行（选夹角更大的垂直方向）
+            perp = t_theta + math.pi / 2
+            if abs(((theta - perp + math.pi) % (2 * math.pi)) - math.pi) > math.pi / 2:
+                perp += math.pi
+            return {"type": "move", "theta": perp, "r": MOVE_R,
+                    "duration_ms": MOVE_DURATION_MS, "reason": "avoid_turret"}
     move = {"type": "move", "theta": theta, "r": MOVE_R,
             "duration_ms": MOVE_DURATION_MS, "reason": reason}
     return _debounced(move, now, cooldowns)
