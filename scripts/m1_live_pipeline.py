@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from wzry.calib import load_calibration  # noqa: E402
 from wzry.capture.scrcpy_stream import ScrcpyStreamCapture  # noqa: E402
+from wzry.data.collector import MatchRecorder  # noqa: E402
 from wzry.state.fuser import build_state  # noqa: E402
 from wzry.state.match_state import MatchPhase, MatchStateMachine  # noqa: E402
 from wzry.vision.detector import YoloDetector  # noqa: E402
@@ -72,6 +73,7 @@ def main():
     confirm_streak = 0
     CONFIRM_FRAMES = 2
     confirmed = False
+    recorder = MatchRecorder(base_dir=ROOT / "data" / "matches")
 
     print("M1 感知管线运行中...\n")
     try:
@@ -85,6 +87,9 @@ def main():
             if phase != MatchPhase.IN_MATCH:
                 confirm_streak = 0
                 confirmed = False
+                if recorder.active:
+                    recorder.close()
+                    print(f"[{datetime.now():%H:%M:%S}] 对局结束，会话已归档")
 
             now = time.time()
             if phase == MatchPhase.IN_MATCH and now - last_detect >= detect_interval:
@@ -120,11 +125,14 @@ def main():
                          f"小地图 未找到 ({tracker.last_ms:.0f}ms)"
                 print(f"[{datetime.now():%H:%M:%S}] {phase.value:<9} 采集延迟 {lag_ms:5.0f}ms "
                       f"检测 {infer:5.0f}ms | {objs} | {mm_txt}")
-                if phase == MatchPhase.IN_MATCH and not args.no_save and now - last_save >= args.save_every:
-                    last_save = now
-                    save_dir.mkdir(parents=True, exist_ok=True)
-                    fn = save_dir / f"state_{datetime.now():%Y%m%d_%H%M%S_%f}.json"
-                    fn.write_text(st.to_json(), encoding="utf-8")
+                if not args.no_save:
+                    if not recorder.active:
+                        recorder.start(meta={"video_source": "scrcpy",
+                                             "match_phase_seen": phase.value})
+                    if now - last_save >= args.save_every:
+                        last_save = now
+                        recorder.on_state(st.to_dict())
+                        recorder.on_frame(frame)
                 if args.show:
                     import cv2
                     vis = frame.copy()
@@ -138,6 +146,8 @@ def main():
                         break
         print(f"\n完成: 收到 {n_frames} 帧")
     finally:
+        if recorder.active:
+            recorder.close()
         cap.stop()
         if args.show:
             import cv2
