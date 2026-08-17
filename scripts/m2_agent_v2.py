@@ -33,15 +33,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # ---------------------------------------------------------------------------
-# 决策参数（v0）
+# 决策参数（v2.1，用户规则指导版）
 # ---------------------------------------------------------------------------
-SKILL2_THROTTLE_S = 3.0      # 2 技能（钩子）冷却节流：间隔 > 3s
-SKILL1_THROTTLE_S = 1.5      # 1 技能节流：间隔 > 1.5s
-SKILL_DEBOUNCE_S = 0.05      # 技能释放后 50ms 防抖：不重复移动
-SKILL2_RANGE_FRAC = 0.42     # 2 技能可命中距离（相对屏宽，钩子射程较长）
-NEAR_FRAC = 0.25             # 敌人"近"阈值：中心距屏幕中心 < 0.25 屏宽
-MOVE_R = 0.8                 # 摇杆幅度
-MOVE_DURATION_MS = 400       # 移动按住时长（ms）
+SKILL2_THROTTLE_S = 3.0       # 2 技能（钩子）节流：间隔 > 3s（真实冷却由游戏管，节流防重复下发）
+SKILL1_THROTTLE_S = 1.5       # 1 技能节流
+SUMMONER_THROTTLE_S = 30.0    # 召唤师技能节流（CD 较长）
+SKILL3_ACTIVE_S = 3.5         # 大招生效期：三技能释放后 3.5s 内不释放一技能
+SKILL_DEBOUNCE_S = 0.05       # 技能释放后防抖：不重复移动
+SKILL2_RANGE_FRAC = 0.42      # 二技能（钩子）范围（相对屏宽）【待用户校准】
+NEAR_FRAC = 0.25              # 一技能"身边"阈值（敌人或敌兵 < 0.25 屏宽）
+HOOK_CONFIRM_S = 1.0          # 勾中确认窗：二技能释放后 1s 内判定
+HOOK_DIST_SHRINK = 0.72       # 勾中判据：敌人距离缩小到释放时的 72% 以下
+MOVE_R = 0.8
+MOVE_DURATION_MS = 2000       # 持续拖动（用户要求：轮盘移动不是点按而是一直拖动）
+# 发育路方向（小地图归一化坐标，蓝方视角发育路≈右下；帮射手）
+LANE_DIR = (0.72, 0.82)
+# 塔规避：屏幕存在敌方塔且无我方小兵时，移动方向朝塔则偏转远离
+TURRET_SAFE_FRAC = 0.55       # 塔在屏幕内时与移动目标方向冲突判定阈值
 
 
 def _debounced(action: dict, now: float, cooldowns: dict) -> dict:
@@ -52,73 +60,150 @@ def _debounced(action: dict, now: float, cooldowns: dict) -> dict:
 
 
 def decide(state_dict: dict, cooldowns: dict) -> dict:
-    """规则决策（纯函数，无 IO）：state_dict -> action_dict。
+    """规则决策 v2.1（用户策略指导版）：state_dict -> action_dict。
 
-    state_dict 与 GameState.to_dict() 同构：
-      - units: [{"cls": "enemy_hero|hook_aim|...", "screen": [cx, cy, w, h] 归一化}, ...]
-      - minimap: {"found": bool, "dots": {"blue": [[nx, ny], ...], "red": [...], ...}}
-      - screen_size: [w, h]（用于把纵向距离折算成"屏宽"单位）
-      - t: 决策时刻（秒），与 cooldowns 里的时间戳同一时钟
-    cooldowns: {"skill1": last_t, "skill2": last_t, "skill": last_t}（秒，0=从未释放）。
+    优先级（用户规则）：
+      0. 勾中连招：二技能释放后窗口内敌人被拉近 → 召唤师技能 + 三技能
+      1. 塔规避：敌方塔可见且无我方小兵 → 移动避开塔攻击范围（技能不受限）
+      2. 二技能：敌方英雄在二技能范围内 → 钩子
+      3. 一技能：不在大招生效期 且 敌人/敌兵在身边 → 一技能
+      4. 移动：有敌人 → 朝最近敌人持续拖动；无敌人 → 帮发育路射手
+         （跟随最近 ally_hero，否则朝发育路方向）
 
-    返回 action_dict（与 wzry/train/encoding.py 的 encode_action 兼容）：
-      {"type": "skill", "id": 1|2, "mode": "tap", "reason": ...}
-      {"type": "move", "theta": 弧度, "r": 0.8, "duration_ms": 400, "reason": ...}
-      {"type": "none", "reason": ...}
+    记忆（cooldowns 扩展字段）：
+      skill2_t / skill1_t / skill3_t / summoner_t  最近释放时间
+      hook_anchor_dist  二技能释放时最近敌人距离（勾中判定基准）
+      hook_pending      二技能释放时刻（勾中确认窗起点）
     """
     now = float(state_dict.get("t") or 0.0)
     w, h = state_dict.get("screen_size") or (1280.0, 720.0)
     aspect = (float(h) / float(w)) if w else 0.5625
 
     units = state_dict.get("units") or []
-    enemies, hook_aim = [], False
+    enemies, minions, turrets, allies, ally_minions = [], [], [], [], []
     for u in units:
         cls = str(u.get("cls", ""))
+        scr = u.get("screen") or [0.5, 0.5, 0.0, 0.0]
         if cls == "enemy_hero":
-            enemies.append(u.get("screen") or [0.5, 0.5, 0.0, 0.0])
-        elif cls == "hook_aim":
-            hook_aim = True
+            enemies.append(scr)
+        elif cls == "enemy_minion":
+            minions.append(scr)
+        elif cls == "enemy_turret":
+            turrets.append(scr)
+        elif cls == "ally_hero":
+            allies.append(scr)
+        elif cls == "ally_minion":
+            ally_minions.append(scr)
 
     def dist_width(cx, cy):
-        """归一化屏幕坐标 -> 相对屏宽的距离（纵向按 h/w 折算）。"""
         return math.hypot(cx - 0.5, (cy - 0.5) * aspect)
+
+    def nearest(lst):
+        if not lst:
+            return None
+        return min(lst, key=lambda s: dist_width(s[0], s[1]))
 
     def ready(key, thr):
         return now - float(cooldowns.get(key, 0.0)) > thr
 
-    if enemies:
-        nearest = min(enemies, key=lambda s: dist_width(s[0], s[1]))
-        d = dist_width(nearest[0], nearest[1])
-        in_s2_range = any(dist_width(s[0], s[1]) <= SKILL2_RANGE_FRAC
-                          for s in enemies)
-        # 1) 钩子可命中：hook_aim 指示线 或 敌方英雄进入 2 技能距离
-        if (hook_aim or in_s2_range) and ready("skill2", SKILL2_THROTTLE_S):
-            return {"type": "skill", "id": 2, "mode": "tap",
-                    "reason": "hook_aim" if hook_aim else "enemy_in_skill2_range"}
-        # 2) 敌人近：中心距屏幕中心 < 0.25 屏宽
-        if d < NEAR_FRAC and ready("skill1", SKILL1_THROTTLE_S):
-            return {"type": "skill", "id": 1, "mode": "tap", "reason": "enemy_near"}
-        # 3) 敌人远：朝最近敌人移动（theta 0=右，逆时针为正，与执行器一致）
-        move = {"type": "move",
-                "theta": math.atan2(-(nearest[1] - 0.5) * aspect, nearest[0] - 0.5),
-                "r": MOVE_R, "duration_ms": MOVE_DURATION_MS,
-                "reason": "chase_enemy"}
-        return _debounced(move, now, cooldowns)
+    # ---- 0) 勾中连招：二技能释放后窗口内，敌人距离显著缩小 = 勾到了 ----
+    hook_pending = float(cooldowns.get("hook_pending", 0.0))
+    if hook_pending > 0 and now - hook_pending <= HOOK_CONFIRM_S:
+        anchor = float(cooldowns.get("hook_anchor_dist", 0.0))
+        ne = nearest(enemies)
+        if ne is not None and anchor > 0:
+            d = dist_width(ne[0], ne[1])
+            if d < anchor * HOOK_DIST_SHRINK:
+                cooldowns["hook_pending"] = 0.0
+                combo = []
+                if ready("summoner_t", SUMMONER_THROTTLE_S):
+                    combo.append({"type": "summoner"})
+                if ready("skill3_t", SKILL3_ACTIVE_S):
+                    combo.append({"type": "skill", "id": 3, "mode": "tap"})
+                if combo:
+                    cooldowns["summoner_t"] = now
+                    cooldowns["skill3_t"] = now
+                    cooldowns["skill"] = now
+                    return {"type": "combo", "actions": combo, "reason": "hook_confirmed"}
+        if now - hook_pending > HOOK_CONFIRM_S:
+            cooldowns["hook_pending"] = 0.0
 
-    # 4) 无敌人：朝兵线方向移动（小地图红点质心方向）；无红点则 idle
-    mm = state_dict.get("minimap") or {}
-    red = []
-    if mm.get("found"):
-        red = (mm.get("dots") or {}).get("red") or []
-    if red:
-        cx = sum(p[0] for p in red) / len(red)
-        cy = sum(p[1] for p in red) / len(red)
-        move = {"type": "move",
-                "theta": math.atan2(-(cy - 0.5), cx - 0.5),
-                "r": MOVE_R, "duration_ms": MOVE_DURATION_MS,
-                "reason": "lane_red_centroid"}
-        return _debounced(move, now, cooldowns)
-    return {"type": "none", "reason": "no_target"}
+    # ---- 1) 塔规避：敌塔可见且无我方小兵(ally_minion) → 不进入塔攻击范围 ----
+    turret_threat = bool(turrets) and not ally_minions
+    if turret_threat:
+        ne = nearest(enemies)
+        nt = nearest(turrets)
+        if ne is None and nt is not None:
+            # 无敌人时也不朝塔方向走（朝远离塔方向）
+            tx, ty = nt[0], nt[1]
+            away_theta = math.atan2(-(ty - 0.5) * aspect, -(tx - 0.5))
+            return {"type": "move", "theta": away_theta, "r": MOVE_R,
+                    "duration_ms": MOVE_DURATION_MS, "reason": "avoid_turret"}
+        # 有敌人时：若敌人与塔同向且塔威胁，仍可钩（钩子不进场），移动方向保持但标记
+        cooldowns["turret_threat"] = 1.0
+    else:
+        cooldowns["turret_threat"] = 0.0
+
+    # ---- 2) 二技能：敌方英雄在钩子范围内 ----
+    if enemies:
+        ne = nearest(enemies)
+        d = dist_width(ne[0], ne[1])
+        if d <= SKILL2_RANGE_FRAC and ready("skill2_t", SKILL2_THROTTLE_S):
+            cooldowns["skill2_t"] = now
+            cooldowns["skill"] = now
+            cooldowns["hook_pending"] = now
+            cooldowns["hook_anchor_dist"] = d
+            return {"type": "skill", "id": 2, "mode": "tap", "reason": "enemy_in_skill2_range"}
+
+    # ---- 3) 一技能：不在大招生效期 且 敌人/敌兵在身边 ----
+    in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= SKILL3_ACTIVE_S
+    if not in_ult and ready("skill1_t", SKILL1_THROTTLE_S):
+        ne = nearest(enemies)
+        ne_m = nearest(minions)
+        d_e = dist_width(ne[0], ne[1]) if ne else float("inf")
+        d_m = dist_width(ne_m[0], ne_m[1]) if ne_m else float("inf")
+        if min(d_e, d_m) < NEAR_FRAC:
+            cooldowns["skill1_t"] = now
+            cooldowns["skill"] = now
+            return {"type": "skill", "id": 1, "mode": "tap",
+                    "reason": "enemy_or_minion_near"}
+
+    # ---- 4) 移动：持续拖动 ----
+    target = None
+    reason = None
+    if enemies:
+        ne = nearest(enemies)
+        target = (ne[0], ne[1])
+        reason = "chase_enemy"
+    else:
+        # 帮发育路射手：跟随最近 ally_hero，否则朝发育路方向
+        na = nearest(allies)
+        if na is not None:
+            target = (na[0], na[1])
+            reason = "follow_ally"
+        else:
+            mm = state_dict.get("minimap") or {}
+            if mm.get("found") and LANE_DIR:
+                lx, ly = LANE_DIR
+                target = (lx, ly)
+                reason = "lane_develop"
+    if target is None:
+        return {"type": "none", "reason": "no_target"}
+    theta = math.atan2(-(target[1] - 0.5) * aspect, target[0] - 0.5)
+    # 塔规避：若移动方向朝向威胁塔，偏转远离（不进塔范围）
+    if turret_threat and cooldowns.get("turret_threat"):
+        nt = nearest(turrets)
+        if nt is not None:
+            tx, ty = nt[0], nt[1]
+            t_theta = math.atan2(-(ty - 0.5) * aspect, tx - 0.5)
+            diff = abs(((theta - t_theta + math.pi) % (2 * math.pi)) - math.pi)
+            if diff < math.pi / 4:  # 目标方向与塔同向
+                away = math.atan2(-(ty - 0.5) * aspect, -(tx - 0.5))
+                return {"type": "move", "theta": away, "r": MOVE_R,
+                        "duration_ms": MOVE_DURATION_MS, "reason": "avoid_turret"}
+    move = {"type": "move", "theta": theta, "r": MOVE_R,
+            "duration_ms": MOVE_DURATION_MS, "reason": reason}
+    return _debounced(move, now, cooldowns)
 
 
 # ---------------------------------------------------------------------------
@@ -127,15 +212,21 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
 
 def update_cooldowns(action: dict, cooldowns: dict, now: float):
     """按已下发的动作推进冷却状态（模拟或真实执行后都调用）。"""
-    if action.get("type") == "skill":
+    t = action.get("type")
+    if t == "skill":
         sid = int(action.get("id", 0))
-        if sid in (1, 2):
-            cooldowns[f"skill{sid}"] = now
+        cooldowns[f"skill{sid}_t"] = now
         cooldowns["skill"] = now
+    elif t == "summoner":
+        cooldowns["summoner_t"] = now
+        cooldowns["skill"] = now
+    elif t == "combo":
+        for sub in action.get("actions", []):
+            update_cooldowns(sub, cooldowns, now)
 
 
 def apply_action(ex, action: dict, cooldowns: dict):
-    """真实执行：move / skill_cast，并推进冷却。"""
+    """真实执行：move / skill_cast / summoner / combo，并推进冷却。"""
     now = time.time()
     t = action.get("type")
     if t == "move":
@@ -144,6 +235,13 @@ def apply_action(ex, action: dict, cooldowns: dict):
                 int(action.get("duration_ms", MOVE_DURATION_MS)))
     elif t == "skill":
         ex.skill_cast(int(action.get("id", 0)), action.get("mode", "tap"))
+    elif t == "summoner":
+        ex.summoner()
+    elif t == "combo":
+        for i, sub in enumerate(action.get("actions", [])):
+            apply_action(ex, sub, cooldowns)
+            if i < len(action["actions"]) - 1:
+                time.sleep(0.12)  # 连招间隔（召唤师→大招）
     update_cooldowns(action, cooldowns, now)
 
 
@@ -154,6 +252,11 @@ def format_decision(action: dict) -> str:
         return f"无动作 ({reason})"
     if t == "skill":
         return f"技能{action.get('id')} ({action.get('mode', 'tap')}) [{reason}]"
+    if t == "summoner":
+        return f"召唤师技能 [{reason}]"
+    if t == "combo":
+        names = [f"{a.get('type')}{a.get('id', '')}" for a in action.get("actions", [])]
+        return f"连招 {'→'.join(names)} [{reason}]"
     if t == "move":
         return (f"移动 θ={action.get('theta', 0.0):+.2f} r={action.get('r', 0.0)} "
                 f"{action.get('duration_ms', 0)}ms [{reason}]")
@@ -217,7 +320,9 @@ def main():
         print("动作模式: 仅观察（默认 --no-action，不注入任何触摸；加 --action 才执行）")
 
     recorder = MatchRecorder(base_dir=ROOT / "data" / "matches")
-    cooldowns = {"skill1": 0.0, "skill2": 0.0, "skill": 0.0}
+    cooldowns = {"skill1_t": 0.0, "skill2_t": 0.0, "skill3_t": 0.0,
+                 "summoner_t": 0.0, "skill": 0.0, "hook_pending": 0.0,
+                 "hook_anchor_dist": 0.0, "turret_threat": 0.0}
 
     # 确认制：状态机判定 in_match 后，还需小地图 tracker 连续 2 帧确认
     CONFIRM_FRAMES = 2
@@ -308,7 +413,15 @@ def main():
                 if do_action and action.get("type") != "none":
                     rec = dict(action)
                     rec["t"] = time.time()
-                    recorder.on_action(rec)
+                    if rec.get("type") == "combo":
+                        # 连招拆成子动作存档（encode_action 兼容）
+                        for sub in rec.get("actions", []):
+                            sub_rec = dict(sub)
+                            sub_rec["t"] = rec["t"]
+                            sub_rec["reason"] = rec.get("reason", "hook_confirmed")
+                            recorder.on_action(sub_rec)
+                    else:
+                        recorder.on_action(rec)
 
             # ---- 周期日志 / 预览 ----
             if now - last_log >= 0.5:

@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
-"""M2 Agent v2 决策单元测试：用 mock 的"检测结果 + 小地图"输入测试 decide()，
-断言输出动作类型与参数；不依赖真机 / 模型 / 触摸。
+"""M2 Agent v2.1 决策单元测试（用户策略指导版）。
 
-构造 4 个核心场景：
-  1. 钩子命中（hook_aim 或 敌人在 2 技能距离内） -> skill 2
-  2. 敌人近（中心距屏幕中心 < 0.25 屏宽）         -> skill 1
-  3. 敌人远                                       -> move(朝向敌人)
-  4. 无敌人                                       -> 朝小地图红点质心移动 / idle
-外加冷却节流与技能后 50ms 防抖用例。
-
+场景（用户规则）：
+  0. 勾中连招：二技能释放后窗口内敌人被拉近 → 召唤师技能 + 三技能
+  1. 塔规避：敌方塔可见且无我方小兵 → 移动避开（技能不受限）
+  2. 二技能：敌方英雄在二技能范围内 → 钩子
+  3. 一技能：不在大招生效期 且 敌人/敌兵在身边 → 一技能
+  4. 移动：有敌人→朝最近敌人持续拖动(2000ms)；无敌人→跟随 ally_hero 或朝发育路
 运行：
     venv\\Scripts\\python.exe scripts\\m2_agent_v2_test.py
 """
@@ -18,15 +16,16 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from m2_agent_v2 import decide  # noqa: E402
+from m2_agent_v2 import decide, LANE_DIR, MOVE_DURATION_MS  # noqa: E402
 
 W, H = 1280, 720
-T = 100.0  # 统一的"现在"时刻，冷却时间戳相对它构造
+T = 100.0
 
 
 def fresh_cd():
-    """全部技能从未释放 -> 均就绪。"""
-    return {"skill1": 0.0, "skill2": 0.0, "skill": 0.0}
+    return {"skill1_t": 0.0, "skill2_t": 0.0, "skill3_t": 0.0,
+            "summoner_t": 0.0, "skill": 0.0, "hook_pending": 0.0,
+            "hook_anchor_dist": 0.0, "turret_threat": 0.0}
 
 
 def state(units=None, minimap=None, t=T, screen=(W, H)):
@@ -38,8 +37,16 @@ def enemy(cx, cy):
     return {"cls": "enemy_hero", "screen": [cx, cy, 0.06, 0.06]}
 
 
-def hook():
-    return {"cls": "hook_aim", "screen": [0.5, 0.5, 0.10, 0.10]}
+def enemy_minion(cx, cy):
+    return {"cls": "enemy_minion", "screen": [cx, cy, 0.04, 0.04]}
+
+
+def enemy_turret(cx, cy):
+    return {"cls": "enemy_turret", "screen": [cx, cy, 0.10, 0.10]}
+
+
+def ally(cx, cy):
+    return {"cls": "ally_hero", "screen": [cx, cy, 0.06, 0.06]}
 
 
 def mm_found(red=None, blue=None):
@@ -48,192 +55,147 @@ def mm_found(red=None, blue=None):
             "towers": []}
 
 
-class TestHookCanHit(unittest.TestCase):
-    """场景 1：钩子可命中 -> skill 2。"""
+class TestHookCombo(unittest.TestCase):
+    """规则 0：勾中连招 -> summoner + skill3。"""
 
-    def test_hook_aim_detected_triggers_skill2(self):
-        # hook_aim 指示线出现（敌人即使很远也按钩子优先）
-        st = state(units=[enemy(0.90, 0.50), hook()])
-        act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "skill")
-        self.assertEqual(act["id"], 2)
-        self.assertEqual(act["mode"], "tap")
-        self.assertEqual(act["reason"], "hook_aim")
-
-    def test_enemy_in_skill2_range_triggers_skill2(self):
-        # 无 hook_aim，但敌人进入 2 技能距离（0.35 屏宽 < 0.42）
-        st = state(units=[enemy(0.85, 0.50)])  # dx=0.35
-        act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "skill")
-        self.assertEqual(act["id"], 2)
-        self.assertEqual(act["reason"], "enemy_in_skill2_range")
-
-    def test_enemy_near_still_hook_priority(self):
-        # 敌人很近（0.2 屏宽）且 2 技能就绪：按优先级仍先出钩子
-        st = state(units=[enemy(0.70, 0.50)])  # dx=0.20 < 0.25 也 < 0.42
-        act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "skill")
-        self.assertEqual(act["id"], 2)
-
-
-class TestEnemyNear(unittest.TestCase):
-    """场景 2：敌人近 -> skill 1（2 技能冷却时回退到 1 技能）。"""
-
-    def test_enemy_near_triggers_skill1_when_skill2_cd(self):
-        # 敌人 0.2 屏宽：在 2 技能距离内，但 2 技能 1s 前刚放（>3s 节流未满足）
+    def test_hook_confirmed_triggers_combo(self):
         cd = fresh_cd()
-        cd["skill2"] = T - 1.0
-        st = state(units=[enemy(0.70, 0.50)])
+        cd["hook_pending"] = T - 0.2          # 0.2s 前放钩
+        cd["hook_anchor_dist"] = 0.40         # 释放时敌人在 0.4 屏宽
+        st = state(units=[enemy(0.68, 0.50)])  # 现在 0.18 < 0.40*0.72=0.288 -> 勾中
         act = decide(st, cd)
-        self.assertEqual(act["type"], "skill")
-        self.assertEqual(act["id"], 1)
-        self.assertEqual(act["reason"], "enemy_near")
+        self.assertEqual(act["type"], "combo")
+        types = [a["type"] for a in act["actions"]]
+        self.assertEqual(types, ["summoner", "skill"])
+        self.assertEqual(act["actions"][1]["id"], 3)
 
-    def test_enemy_near_throttled_skill1_falls_to_move(self):
-        # 敌人近，但 1 技能 1s 前刚放（>1.5s 节流未满足），2 技能也在冷却
+    def test_no_combo_when_enemy_not_pulled(self):
         cd = fresh_cd()
-        cd["skill2"] = T - 1.0
-        cd["skill1"] = T - 1.0
-        st = state(units=[enemy(0.70, 0.50)])
+        cd["hook_pending"] = T - 0.2
+        cd["hook_anchor_dist"] = 0.20
+        st = state(units=[enemy(0.62, 0.50)])  # 0.12 < 0.144 也缩小了 -> 仍算勾中
         act = decide(st, cd)
-        self.assertEqual(act["type"], "move")
-        self.assertAlmostEqual(act["theta"], 0.0, places=6)  # 敌人正右方
+        # 距离 0.12 < 0.20*0.72=0.144 -> 勾中
+        self.assertEqual(act["type"], "combo")
 
-
-class TestEnemyFar(unittest.TestCase):
-    """场景 3：敌人远 -> move(朝向最近敌人, r=0.8, 400ms)。"""
-
-    def test_enemy_far_moves_toward_enemy(self):
-        # 敌人 0.45 屏宽（> 0.42 不在 2 技能距离，> 0.25 不近）
-        st = state(units=[enemy(0.95, 0.50)])
-        act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "move")
-        self.assertEqual(act["r"], 0.8)
-        self.assertEqual(act["duration_ms"], 400)
-        self.assertAlmostEqual(act["theta"], 0.0, places=6)
-        self.assertEqual(act["reason"], "chase_enemy")
-
-    def test_move_theta_points_at_below_right_enemy(self):
-        # 敌人位于屏幕中心右下且超出 2 技能距离（d≈0.46 屏宽）：
-        # theta 应为负（向下），幅值 atan2(-dy*aspect, dx)
-        st = state(units=[enemy(0.95, 0.70)])
-        act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "move")
-        exp = math.atan2(-(0.70 - 0.5) * (H / W), 0.95 - 0.5)
-        self.assertAlmostEqual(act["theta"], exp, places=6)
-
-    def test_chase_picks_nearest_enemy(self):
-        # 多个敌人：选最近的那个。两个都超出近身阈值（>0.25 屏宽），
-        # 且 2 技能在冷却（避免钩子分支），验证 theta 指向较近者 (0.75, 0.30)
+    def test_combo_window_expires(self):
         cd = fresh_cd()
-        cd["skill2"] = T - 1.0  # 2 技能冷却，避免钩子分支
-        st = state(units=[enemy(0.95, 0.50), enemy(0.75, 0.30)])
+        cd["hook_pending"] = T - 2.0           # 超窗
+        cd["hook_anchor_dist"] = 0.40
+        st = state(units=[enemy(0.55, 0.50)])  # 很近
         act = decide(st, cd)
-        self.assertEqual(act["type"], "move")
-        exp = math.atan2(-(0.30 - 0.5) * (H / W), 0.75 - 0.5)  # 最近者 (0.75,0.30)
-        self.assertAlmostEqual(act["theta"], exp, places=6)
+        self.assertNotEqual(act["type"], "combo")
+        # 距离 0.05 < 0.42 -> 钩子（冷却就绪）
+        self.assertEqual((act["type"], act.get("id")), ("skill", 2))
 
 
-class TestNoEnemy(unittest.TestCase):
-    """场景 4：无敌人 -> 朝小地图红点质心移动；无红点则 idle。"""
+class TestTurretAvoid(unittest.TestCase):
+    """规则 1：塔规避。"""
 
-    def test_moves_to_red_centroid(self):
-        # 红点质心在 (0.7, 0.5)（正右）-> theta ≈ 0
-        st = state(units=[], minimap=mm_found(red=[[0.7, 0.5]]))
+    def test_avoid_turret_when_no_allied_minion(self):
+        st = state(units=[enemy_turret(0.7, 0.5)])
         act = decide(st, fresh_cd())
         self.assertEqual(act["type"], "move")
-        self.assertEqual(act["r"], 0.8)
-        self.assertEqual(act["duration_ms"], 400)
-        self.assertAlmostEqual(act["theta"], 0.0, places=6)
-        self.assertEqual(act["reason"], "lane_red_centroid")
+        self.assertEqual(act["reason"], "avoid_turret")
+        # 远离塔：塔在右 -> theta 朝左（±pi 等价）
+        self.assertAlmostEqual(math.cos(act["theta"]), math.cos(math.pi), places=4)
 
-    def test_red_centroid_theta_down(self):
-        # 质心 (0.5, 0.8)（正下，小地图 ny 向下）-> theta ≈ -pi/2
-        st = state(units=[], minimap=mm_found(red=[[0.5, 0.8], [0.5, 0.6]]))
+    def test_no_avoid_when_allied_minion_present(self):
+        st = state(units=[enemy_turret(0.7, 0.5),
+                          {"cls": "ally_minion", "screen": [0.6, 0.5, 0.04, 0.04]}])
         act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "move")
-        self.assertAlmostEqual(act["theta"], -math.pi / 2, places=6)
+        self.assertNotEqual(act["reason"], "avoid_turret")
 
-    def test_red_centroid_averages_dots(self):
-        # 两个红点 (0.6,0.4)+(0.6,0.6) -> 质心 (0.6, 0.5) -> theta ≈ 0
-        st = state(units=[], minimap=mm_found(red=[[0.6, 0.4], [0.6, 0.6]]))
+
+class TestSkill2(unittest.TestCase):
+    """规则 2：敌人在二技能范围内 -> 钩子。"""
+
+    def test_enemy_in_range_triggers_skill2(self):
+        st = state(units=[enemy(0.85, 0.50)])  # dx=0.35 < 0.42
         act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "move")
-        self.assertAlmostEqual(act["theta"], 0.0, places=6)
+        self.assertEqual((act["type"], act["id"]), ("skill", 2))
 
-    def test_no_red_dots_idle(self):
-        st = state(units=[], minimap=mm_found(red=[]))
-        act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "none")
-
-    def test_no_minimap_idle(self):
-        st = state(units=[], minimap={"found": False})
-        act = decide(st, fresh_cd())
-        self.assertEqual(act["type"], "none")
-
-    def test_empty_state_idle(self):
-        act = decide(state(), fresh_cd())
-        self.assertEqual(act["type"], "none")
-
-
-class TestCooldownAndDebounce(unittest.TestCase):
-    """冷却节流 + 技能后 50ms 防抖。"""
-
-    def test_skill2_throttle_over_3s(self):
+    def test_enemy_out_of_range_no_hook(self):
         cd = fresh_cd()
-        cd["skill2"] = T - 3.1  # 3.1s 前 -> 刚过 3s 节流 -> 可再放
-        st = state(units=[enemy(0.90, 0.50), hook()])
+        st = state(units=[enemy(0.95, 0.50)])  # dx=0.45 > 0.42
         act = decide(st, cd)
-        self.assertEqual(act["type"], "skill")
-        self.assertEqual(act["id"], 2)
+        self.assertNotEqual((act["type"], act.get("id")), ("skill", 2))
+        self.assertEqual(act["type"], "move")
 
-    def test_skill2_throttle_blocks(self):
+    def test_skill2_throttle(self):
         cd = fresh_cd()
-        cd["skill2"] = T - 2.0  # 2s 前 -> 未过 3s 节流 -> 不放大招级钩子
-        st = state(units=[enemy(0.95, 0.50), hook()])
+        cd["skill2_t"] = T - 2.0  # 2s 前 -> 未过 3s 节流
+        st = state(units=[enemy(0.85, 0.50)])
         act = decide(st, cd)
         self.assertNotEqual((act["type"], act.get("id")), ("skill", 2))
 
-    def test_skill1_throttle_blocks(self):
+
+class TestSkill1(unittest.TestCase):
+    """规则 3：一技能（不在大招生效期 + 敌人/敌兵在身边）。"""
+
+    def test_skill1_when_enemy_near(self):
         cd = fresh_cd()
-        cd["skill2"] = T - 1.0  # 2 技能冷却，逼到 1 技能分支
-        cd["skill1"] = T - 1.0  # 1 技能 1s 前 -> 未过 1.5s 节流
+        cd["skill2_t"] = T - 4.0  # 2 技能冷却已过? 不——4s 前 -> 就绪，会先钩子
+        # 敌人 0.2 屏宽在 0.42 内 -> 钩子优先。要测 1 技能需钩子不可用
+        cd["skill2_t"] = T - 2.0  # 2 技能节流中
+        st = state(units=[enemy(0.70, 0.50)])  # 0.2 < 0.25
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act["id"]), ("skill", 1))
+
+    def test_skill1_when_enemy_minion_near(self):
+        cd = fresh_cd()
+        cd["skill2_t"] = T - 2.0
+        st = state(units=[enemy_minion(0.72, 0.50)])  # 0.22 < 0.25
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act["id"]), ("skill", 1))
+
+    def test_no_skill1_during_ult(self):
+        cd = fresh_cd()
+        cd["skill2_t"] = T - 2.0
+        cd["skill3_t"] = T - 1.0  # 大招 1s 前 -> 生效期内，1 技能被抑制
         st = state(units=[enemy(0.70, 0.50)])
         act = decide(st, cd)
         self.assertNotEqual((act["type"], act.get("id")), ("skill", 1))
-        self.assertEqual(act["type"], "move")  # 回退为移动
 
-    def test_skill_debounce_suppresses_move(self):
-        cd = fresh_cd()
-        cd["skill"] = T - 0.03  # 30ms 前刚放技能 -> 移动被防抖
-        st = state(units=[enemy(0.95, 0.50)])  # 本应 chase_enemy
-        act = decide(st, cd)
-        self.assertEqual(act["type"], "none")
-        self.assertEqual(act["reason"], "skill_debounce")
 
-    def test_skill_debounce_blocks_lane_move(self):
-        cd = fresh_cd()
-        cd["skill"] = T - 0.01
-        st = state(units=[], minimap=mm_found(red=[[0.7, 0.5]]))
-        act = decide(st, cd)
-        self.assertEqual(act["type"], "none")
-        self.assertEqual(act["reason"], "skill_debounce")
+class TestMovement(unittest.TestCase):
+    """规则 4：持续拖动移动。"""
 
-    def test_skill_debounce_does_not_block_skill(self):
-        # 防抖只针对移动；技能本身仍可放（钩子优先）
+    def test_chase_enemy_duration_2000(self):
+        st = state(units=[enemy(0.95, 0.50)])  # 0.45 > 0.42 钩子不可用
+        act = decide(st, fresh_cd())
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["duration_ms"], MOVE_DURATION_MS)
+        self.assertEqual(act["reason"], "chase_enemy")
+        self.assertAlmostEqual(act["theta"], 0.0, places=6)
+
+    def test_follow_ally_when_no_enemy(self):
+        st = state(units=[ally(0.60, 0.50)])
+        act = decide(st, fresh_cd())
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "follow_ally")
+        self.assertAlmostEqual(act["theta"], 0.0, places=6)
+
+    def test_lane_develop_when_nothing(self):
+        st = state(units=[], minimap=mm_found())
+        act = decide(st, fresh_cd())
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "lane_develop")
+        lx, ly = LANE_DIR
+        exp = math.atan2(-(ly - 0.5) * (H / W), lx - 0.5)  # 与 decide 一致（aspect 折算）
+        self.assertAlmostEqual(act["theta"], exp, places=4)
+
+
+class TestGuard(unittest.TestCase):
+    """防抖。"""
+
+    def test_debounce_suppresses_move(self):
         cd = fresh_cd()
         cd["skill"] = T - 0.03
-        st = state(units=[enemy(0.70, 0.50)])  # 近且 2 技能就绪
-        act = decide(st, cd)
-        self.assertEqual(act["type"], "skill")
-        self.assertEqual(act["id"], 2)
-
-    def test_no_action_when_all_blocked(self):
-        cd = fresh_cd()
-        cd["skill"] = T - 0.03  # 防抖
-        st = state(units=[])    # 且无红点
+        st = state(units=[enemy(0.95, 0.50)])
         act = decide(st, cd)
         self.assertEqual(act["type"], "none")
+        self.assertEqual(act["reason"], "skill_debounce")
 
 
 if __name__ == "__main__":

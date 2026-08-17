@@ -87,6 +87,11 @@ class ActionExecutor:
         x, y = self.attack_pts[priority]
         return self.ex.tap(x, y, source="policy")
 
+    def summoner(self):
+        """召唤师技能（校准点 summoner，默认闪现/惩击位）。"""
+        x, y = PTS["summoner"]
+        return self.ex.tap(x, y, source="policy")
+
     # ---------- 连招 ----------
     def sequence(self, steps, gap_ms: int = 120):
         """连招编排。steps: [(callable, args, kwargs), ...] 或原语 dict 列表。
