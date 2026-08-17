@@ -46,8 +46,9 @@ HOOK_CONFIRM_S = 1.0          # 勾中确认窗：二技能释放后 1s 内判�
 HOOK_DIST_SHRINK = 0.72       # 勾中判据：敌人距离缩小到释放时的 72% 以下
 MOVE_R = 0.8
 MOVE_DURATION_MS = 2000       # 持续拖动（用户要求：轮盘移动不是点按而是一直拖动）
-# 发育路方向（小地图归一化坐标，蓝方视角发育路≈右下；帮射手）
-LANE_DIR = (0.72, 0.82)
+# 发育路方向（小地图归一化坐标）：由开局阵营决定（蓝方右下 / 红方左上镜像）
+LANE_DIR_BLUE = (0.72, 0.82)
+LANE_DIR_RED = (0.28, 0.18)
 # 塔规避：屏幕存在敌方塔且无我方小兵时，移动方向朝塔则偏转远离
 TURRET_SAFE_FRAC = 0.55       # 塔在屏幕内时与移动目标方向冲突判定阈值
 
@@ -176,15 +177,17 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         target = (ne[0], ne[1])
         reason = "chase_enemy"
     else:
-        # 帮发育路射手：跟随最近 ally_hero，否则朝发育路方向
+        # 帮发育路射手：跟随最近 ally_hero，否则朝发育路方向（按阵营镜像）
         na = nearest(allies)
         if na is not None:
             target = (na[0], na[1])
             reason = "follow_ally"
         else:
+            camp = cooldowns.get("camp") or "blue"
+            lane = LANE_DIR_BLUE if camp == "blue" else LANE_DIR_RED
             mm = state_dict.get("minimap") or {}
-            if mm.get("found") and LANE_DIR:
-                lx, ly = LANE_DIR
+            if mm.get("found"):
+                lx, ly = lane
                 target = (lx, ly)
                 reason = "lane_develop"
     if target is None:
@@ -223,6 +226,23 @@ def update_cooldowns(action: dict, cooldowns: dict, now: float):
     elif t == "combo":
         for sub in action.get("actions", []):
             update_cooldowns(sub, cooldowns, now)
+
+
+def _rec_hook_measure(cooldowns: dict, state_dict: dict, action: dict, hit: bool):
+    """记录钩子释放距离与命中结果（自动标定二技能范围用，写入 data/measure_hook.jsonl）。"""
+    try:
+        import json
+        from pathlib import Path
+        now = float(state_dict.get("t") or time.time())
+        dist = float(cooldowns.get("hook_anchor_dist", 0.0))
+        rec = {"t": now, "dist_frac": round(dist, 4), "hit": hit,
+               "reason": action.get("reason", "")}
+        p = ROOT / "data" / "measure_hook.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def apply_action(ex, action: dict, cooldowns: dict):
@@ -377,6 +397,17 @@ def main():
                 continue
             confirmed = True
 
+            # ---- 开局阵营判断（对局确认后第一帧，泉水颜色）----
+            if not cooldowns.get("camp"):
+                from wzry.vision.camp import detect_camp_from_center
+                camp = detect_camp_from_center(frame)
+                if camp:
+                    cooldowns["camp"] = camp
+                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: {'蓝方' if camp == 'blue' else '红方'} "
+                          f"→ 发育路方向 {LANE_DIR_BLUE if camp == 'blue' else LANE_DIR_RED}")
+                else:
+                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 未判定（泉水色不明显，默认蓝方）")
+
             # ---- 感知 ----
             dets = det.detect(frame)
             st = build_state(frame, dets, phase.value, minimap={
@@ -395,6 +426,12 @@ def main():
             if sig != last_sig:
                 print(f"[{datetime.now():%H:%M:%S}] [决策] {format_decision(action)}")
                 last_sig = sig
+
+            # ---- 钩子射程测量记录（自动标定二技能范围）----
+            if action.get("type") == "skill" and action.get("id") == 2:
+                _rec_hook_measure(cooldowns, state_dict, action, hit=False)
+            if action.get("type") == "combo":
+                _rec_hook_measure(cooldowns, state_dict, action, hit=True)
 
             # ---- 执行 / 模拟 ----
             if action.get("type") != "none":

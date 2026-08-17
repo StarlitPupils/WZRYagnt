@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from m2_agent_v2 import decide, LANE_DIR, MOVE_DURATION_MS  # noqa: E402
+from m2_agent_v2 import decide, LANE_DIR_BLUE, MOVE_DURATION_MS  # noqa: E402
 
 W, H = 1280, 720
 T = 100.0
@@ -178,11 +178,24 @@ class TestMovement(unittest.TestCase):
 
     def test_lane_develop_when_nothing(self):
         st = state(units=[], minimap=mm_found())
-        act = decide(st, fresh_cd())
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        act = decide(st, cd)
         self.assertEqual(act["type"], "move")
         self.assertEqual(act["reason"], "lane_develop")
-        lx, ly = LANE_DIR
+        lx, ly = LANE_DIR_BLUE
         exp = math.atan2(-(ly - 0.5) * (H / W), lx - 0.5)  # 与 decide 一致（aspect 折算）
+        self.assertAlmostEqual(act["theta"], exp, places=4)
+
+    def test_lane_develop_red_mirror(self):
+        """红方发育路应镜像到左上。"""
+        st = state(units=[], minimap=mm_found())
+        cd = fresh_cd()
+        cd["camp"] = "red"
+        act = decide(st, cd)
+        self.assertEqual(act["reason"], "lane_develop")
+        lx, ly = (0.28, 0.18)
+        exp = math.atan2(-(ly - 0.5) * (H / W), lx - 0.5)
         self.assertAlmostEqual(act["theta"], exp, places=4)
 
 
