@@ -17,10 +17,11 @@ def _roi(frame, cx, cy, r):
     return frame[y0:y1, x0:x1]
 
 
-def find_hp_bar(frame, search=(0.08, 0.04, 0.40, 0.15), min_bar_len=40):
-    """在画面顶部区域自动定位己方血条，返回 (x, y, w, h, hp_ratio) 或 None。
+def find_hp_bar(frame, search=(0.0, 0.82, 0.20, 0.96), min_bar_len=40):
+    """在画面【左下角】区域自动定位己方血条，返回 (x, y, w, h, hp_ratio) 或 None。
 
-    王者荣耀血条：左上角英雄头像右侧的水平绿色长条（绿色偏暗，阈值需放宽）。
+    王者荣耀对局 HUD：己方英雄头像+血条在左下角（约 x 0-260, y 590-690，
+    摇杆 move_stick_center=(196,574) 左侧）；顶部中央为敌方状态栏。
     策略（水平条结构检测，抗场景绿色干扰）：
       1. 搜索区绿色掩码（HSV H 35-90, S≥60, V≥70）；
       2. 水平核（31x3）开运算滤掉块状场景绿，只留长横条；
