@@ -3,7 +3,7 @@
 
 多通道设计（每个通道是独立信号源，最后交叉验证融合）：
   A 摇杆箭头   —— 白色箭头区域（HSV 亮度 + 形态学 + 面积/距离过滤）→ 移动方向（连续角 + 8 向标签）
-  B 技能按钮   —— 技能按钮 ROI 亮度相对基线突变（自适应基线）→ 按下事件（时间点）
+  B 技能按钮   —— 技能按钮 ROI 亮度相对基线突变（自适应基线，按下=变暗沿）→ 按下事件（时间点）
   C 特效/位移  —— YOLO 11 类模型：skill_effect 检测 + ally_hero 位移方向/突变 + 血条红色占比突变 → 技能释放证据
   D 瞄准线     —— 技能拖动时的亮色射线（HoughLinesP，按钮近端约束）→ 拖瞄事件
 
@@ -255,25 +255,57 @@ class ArrowChannel:
 
 
 class ButtonChannel:
-    """通道 B：按钮 ROI 亮度相对自适应基线突变 -> 按下事件（防抖 + 上升沿）。"""
+    """通道 B：按钮 ROI 亮度相对自适应基线突变 -> 按下事件（变暗沿 + 防抖 + 释放锁）。
 
-    def __init__(self, pts, r_scale=0.018, delta=22.0, min_abs=150.0, debounce=2,
-                 ema_alpha=0.05):
+    真验发现（M2）：王者荣耀按下技能时按钮是**变暗**而非变亮 —— 技能图标被
+    按下高亮/冷却遮罩压暗：skill2 正常 ~112 -> 按下瞬间 ~60-90（随后 ~11s 冷却
+    遮罩维持 ~60），skill1 正常 ~94.6 -> 按下 ~52-60。旧版按"变亮"检测在本真验
+    录像中 8/8 skill2 全漏（唯一一次"检出"是开局白屏覆盖按钮的误报）。
+
+    机制：
+      - dark = (base - mean) > delta 且 base > min_base（基线本身要够亮，
+        暗色按钮如 attack(~64) 永不触发）
+      - 防抖：连续 dark debounce 帧才发射一次按下事件
+      - 释放锁：发射后锁定，直到按钮恢复非 dark 且持续 release_s 秒（按
+        real_frame 真实帧差计，与采样率无关），防止冷却期遮罩 / 同一次按下
+        的双闪被重复触发
+      - 基线：仅当 |mean - base| < band 时 EMA 更新 —— 253 全屏亮闪与冷却
+        遮罩都不会污染基线
+    """
+
+    def __init__(self, pts, r_scale=0.018, delta=20.0, min_base=70.0, debounce=2,
+                 ema_alpha=0.05, release_s=1.5, min_interval_s=1.5, band=15.0):
         self.r = max(10, int(r_scale * 1280))
         self.delta = delta
-        self.min_abs = min_abs
+        self.min_base = min_base
         self.debounce = debounce
         self.ema_alpha = ema_alpha
+        self.release_s = release_s
+        self.min_interval_s = min_interval_s
+        self.band = band
         self.buttons = {k: pts[k] for k in ALL_BUTTONS if k in pts}
         self.baseline = {}
         self.streak = {k: 0 for k in self.buttons}
-        self.prev_pressed = {k: False for k in self.buttons}
+        self.hold = {k: False for k in self.buttons}
+        self.normal_run = {k: 0 for k in self.buttons}
+        self.last_emit = {k: -1 for k in self.buttons}
+        self.last_real_frame = None
         self.seen = 0
 
-    def detect(self, frame):
-        """返回按下事件列表 [{"button","brightness","baseline","conf","t"}...]（上升沿）。"""
+    def detect(self, frame, real_frame=None, fps=30.0):
+        """返回按下事件列表 [{"button","brightness","baseline","conf"}...]（变暗沿）。
+
+        real_frame/fps 用于把 release_s / min_interval_s 折算成真实帧间隔，
+        使锁定时长与抽样率（sample_every）无关。
+        """
         events = []
         self.seen += 1
+        if real_frame is None:
+            real_frame = self.seen
+        step = 1 if self.last_real_frame is None else max(1, real_frame - self.last_real_frame)
+        self.last_real_frame = real_frame
+        release_frames = max(4, int(self.release_s * fps))
+        min_gap = max(3, int(self.min_interval_s * fps))
         for name, (x, y) in self.buttons.items():
             xi, yi = int(x), int(y)
             roi = frame[max(0, yi - self.r):yi + self.r,
@@ -283,21 +315,30 @@ class ButtonChannel:
             mean = float(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY).mean())
             if name not in self.baseline:
                 self.baseline[name] = mean
+                continue
             base = self.baseline[name]
-            pressed = (mean - base > self.delta) and (mean > self.min_abs)
-            if pressed:
+            dark = (base - mean) > self.delta and base > self.min_base
+            if dark:
                 self.streak[name] += 1
-                # 防抖：连续按下 debounce 帧才发射一次按下事件（仅一次）
-                if self.streak[name] == self.debounce:
-                    rel = clamp01((mean - base) / max(3 * self.delta, 1e-6))
-                    events.append({"button": name, "brightness": mean,
-                                   "baseline": base,
-                                   "conf": clamp01(0.5 + 0.4 * rel)})
+                self.normal_run[name] = 0
             else:
                 self.streak[name] = 0
-                # 仅在未按下时更新基线，避免高亮把基线抬高
-                self.baseline[name] = (1 - self.ema_alpha) * base + self.ema_alpha * mean
-            self.prev_pressed[name] = pressed
+                if abs(mean - base) < self.band:
+                    self.baseline[name] = (1 - self.ema_alpha) * base + self.ema_alpha * mean
+                if self.hold[name]:
+                    self.normal_run[name] += step
+                    if self.normal_run[name] >= release_frames:
+                        self.hold[name] = False
+            if (self.streak[name] >= self.debounce and not self.hold[name]
+                    and real_frame - self.last_emit[name] >= min_gap):
+                rel = clamp01((base - mean) / max(3 * self.delta, 1e-6))
+                events.append({"button": name, "brightness": mean,
+                               "baseline": base,
+                               "conf": clamp01(0.5 + 0.4 * rel)})
+                self.last_emit[name] = real_frame
+                self.hold[name] = True
+                self.normal_run[name] = 0
+                self.streak[name] = 0
         return events
 
 
@@ -578,7 +619,7 @@ class ActionInferrer:
             self.stats["move"] += 1
 
         # B 按钮按下
-        for ev in self.chB.detect(frame):
+        for ev in self.chB.detect(frame, real_frame, fps):
             ev = dict(ev, ch="B", kind="press", t=t, frame=real_frame)
             events.append(ev)
             self.stats["B_press"] += 1
@@ -684,19 +725,22 @@ class ActionInferrer:
             debug_dir.mkdir(parents=True, exist_ok=True)
 
         t0 = time.time()
-        real_frame = 0
+        read_idx = 0
         while True:
             if max_frames and frames_done >= max_frames:
                 break
-            if n_frames > 0 and real_frame >= n_frames:
+            if n_frames > 0 and read_idx >= n_frames:
                 break
             # 顺序读取（避免 set(POS_FRAMES)+read 对损坏 mkv 的解码不稳定）
             ret, frame = cap.read()
             if not ret:
                 break
-            if sample_every > 1 and real_frame % sample_every != 0:
-                real_frame += 1
+            # 抽样：按"读取计数"跳过，而不是按 real_frame（旧版 real_frame 恒为
+            # sample_every 的倍数，跳过分支永不触发，导致只处理了视频前 1/sample_every）
+            if sample_every > 1 and read_idx % sample_every != 0:
+                read_idx += 1
                 continue
+            real_frame = read_idx
             do_yolo = (self.chC.enabled and
                        (frames_done % max(1, yolo_every) == 0))
             if not do_yolo:
@@ -718,7 +762,7 @@ class ActionInferrer:
                 print(f"\r  [infer] 帧 {real_frame}/{n_frames} "
                       f"动作 {len(actions)} 事件 {len(events)} "
                       f"({time.time()-t0:.0f}s)", end="", flush=True)
-            real_frame += sample_every
+            read_idx += 1
         cap.release()
         if progress:
             print()
