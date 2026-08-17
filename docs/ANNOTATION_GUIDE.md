@@ -31,11 +31,12 @@ venv\Scripts\python.exe scripts\vision\annotate.py data\screenshots\zhongkui
 
 ## 复核优先级（按收益排序）
 
-0. **自动预判（推荐先跑）**：`venv\Scripts\python.exe scripts\train\camp_autolabel.py`
-   - 按单位头顶血条颜色（绿=友/红=敌）自动给出 451 个歧义框的阵营建议：
-     105 个高置信"改为友方(2→3/4→5)" + 弱倾向分层（CSV 明细 + 血条裁剪图集 temp/camp_check/）
+0. **自动预判（推荐先跑）**：`venv\Scripts\python.exe scripts\train\camp_autolabel.py --include-hero`
+   - 按单位头顶血条颜色（绿=友/红=敌）自动给出阵营建议：
+     主目录 + replay 目录合计 **216 个高置信建议**（ally_hero 31 / ally_minion 152 / ally_turret 33）
+     + 弱倾向分层（CSV 明细 + 血条裁剪图集 temp/camp_check*/）
    - 先不带 `--apply` 跑，抽查裁剪图集确认准确率；满意后 `--apply` 写入（自动备份 .txt.bak）
-   - 玩红方时加 `--camp red`
+   - 玩红方时加 `--camp red`；replay 目录用 `--img-dir data\screenshots\replay`
 1. **歧义清单**（`data\yolo_dataset\zhongkui\AMBIGUOUS_REVIEW.txt`，294 个文件）：
    逐张打开，把"实际是友方"的框从 id 2→3（ally_minion）、4→5（ally_turret）。
    判断依据：兵线位置（离己方塔近的是友方）、颜色（友方血条绿/敌方红，看框内单位血条颜色）。
