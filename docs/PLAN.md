@@ -21,7 +21,10 @@
 > - ✅ **对局数据采集器**：`wzry/data/collector.py`（MatchRecorder）——按对局会话分目录存档 states.jsonl / frames/ / actions.jsonl / manifest.json，已集成进 m1_live_pipeline。
 > - ✅ **UI 数值读取器 v0**：`wzry/vision/ui_reader.py`——血条自动定位（绿色带检测）+ 技能冷却遮罩占比，待真实对局标定阈值。
 > - ✅ **11 类标签迁移**：`scripts/train/migrate_labels_11class.py`——466 文件 1379 框迁移（带备份），294 个歧义文件清单已生成，data.yaml 更新为 11 类。
-> - ⏳ 待办：11 类 ally 类补标（人工复核歧义清单，见 docs/ANNOTATION_GUIDE.md）；检测器升级 11 类重训；UI 数值阈值标定；真人局验证（训练营→人机→匹配）；fast_prior 性能优化。
+> - ✅ **数据扩充与阵营预判**：录像抽帧 +150 帧/377 框（数据集 367 图/1317 框）；`camp_autolabel.py`（血条颜色判定，216 个高置信 ally 建议 + 联系表抽查）。
+> - ✅ **数据泄漏修复**：prepare_dataset 多次运行导致 train/val 重叠（237 个重复框键）——重建后归零，验证指标可信。
+> - ✅ **11 类实验训练**（v2 实验集，40 轮）：管线端到端跑通（沙盒兼容模式），整体 mAP50=0.511；enemy_turret 0.871 / enemy_hero 0.787 / enemy_minion 0.563 强；ally_hero/ally_minion/ally_turret 样本少但可学（0.20-0.54）。空类（水晶/野怪/特效）待补标。
+> - ⏳ 待办：补标空类（水晶×2/野怪/skill_effect，见 docs/ANNOTATION_GUIDE.md）；用户抽查 camp 建议后 --apply 落盘主数据；全量 11 类重训（120 轮 ~1 小时）；真人局验证；UI 数值阈值标定。
 
 ---
 
