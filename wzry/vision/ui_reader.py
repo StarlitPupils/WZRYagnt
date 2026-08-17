@@ -17,15 +17,15 @@ def _roi(frame, cx, cy, r):
     return frame[y0:y1, x0:x1]
 
 
-def find_hp_bar(frame, search=(0.08, 0.04, 0.35, 0.12), min_bar_len=40):
+def find_hp_bar(frame, search=(0.08, 0.04, 0.40, 0.15), min_bar_len=40):
     """在画面顶部区域自动定位己方血条，返回 (x, y, w, h, hp_ratio) 或 None。
 
-    王者荣耀血条：左上角英雄头像右侧的水平绿色长条。
+    王者荣耀血条：左上角英雄头像右侧的水平绿色长条（绿色偏暗，阈值需放宽）。
     策略（水平条结构检测，抗场景绿色干扰）：
-      1. 搜索区绿色掩码；
+      1. 搜索区绿色掩码（HSV H 35-90, S≥60, V≥70）；
       2. 水平核（31x3）开运算滤掉块状场景绿，只留长横条；
       3. 逐行找最长连续绿色段，作为血条；
-      4. hp_ratio = 绿色段长度 / 血条总长（分段条近似，满血=1）。
+      4. hp_ratio = 绿色段长度 / (绿色段+右侧空槽延伸)。
     """
     h, w = frame.shape[:2]
     x0, y0 = int(search[0] * w), int(search[1] * h)
@@ -34,7 +34,7 @@ def find_hp_bar(frame, search=(0.08, 0.04, 0.35, 0.12), min_bar_len=40):
     if roi.size == 0:
         return None
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    green = cv2.inRange(hsv, (40, 80, 90), (85, 255, 255))
+    green = cv2.inRange(hsv, (35, 60, 70), (90, 255, 255))
     # 水平条结构：31x3 核开运算（保留 >31px 的横条）
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 3))
     bars = cv2.morphologyEx(green, cv2.MORPH_OPEN, kernel)
@@ -42,7 +42,6 @@ def find_hp_bar(frame, search=(0.08, 0.04, 0.35, 0.12), min_bar_len=40):
     best = None
     for ry in range(bars.shape[0]):
         row = bars[ry]
-        runs = np.diff(np.nonzero(np.concatenate(([0], row, [0])))[0]).reshape(-1, 2)
         # 连续段：(起点, 长度)
         segs = []
         in_run = False
