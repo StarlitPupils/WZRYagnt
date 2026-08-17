@@ -67,6 +67,11 @@ def main():
     last_detect = 0.0
     t_end = time.time() + args.seconds
     n_frames = 0
+    # 对局"确认制"：状态机判定 in_match 后，还需小地图 tracker 连续确认，
+    # 防止菜单里的"类小地图"元素（无蓝点）误触发感知与动作
+    confirm_streak = 0
+    CONFIRM_FRAMES = 2
+    confirmed = False
 
     print("M1 感知管线运行中...\n")
     try:
@@ -77,15 +82,29 @@ def main():
                 continue
             n_frames += 1
             phase = sm.update(frame)
+            if phase != MatchPhase.IN_MATCH:
+                confirm_streak = 0
+                confirmed = False
 
             now = time.time()
             if phase == MatchPhase.IN_MATCH and now - last_detect >= detect_interval:
                 last_detect = now
-                dets = det.detect(frame)
-                infer = det.last_infer_ms
                 if tracker is None:
                     tracker = make_tracker(frame)
                 mm = tracker.update(frame)
+                if mm["found"]:
+                    confirm_streak += 1
+                    if confirm_streak >= CONFIRM_FRAMES:
+                        confirmed = True
+                else:
+                    confirm_streak = 0
+                    confirmed = False
+                if not confirmed:
+                    print(f"[{datetime.now():%H:%M:%S}] 对局确认中（状态机 in_match，"
+                          f"小地图待确认 {confirm_streak}/{CONFIRM_FRAMES}）...")
+                    continue
+                dets = det.detect(frame)
+                infer = det.last_infer_ms
                 st = build_state(frame, dets, phase.value, minimap={
                     "found": mm["found"],
                     "center": mm["center"],

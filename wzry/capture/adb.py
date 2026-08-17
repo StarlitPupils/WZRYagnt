@@ -65,6 +65,10 @@ class AdbCapture:
         self.last_size = (frame.shape[1], frame.shape[0])
         return frame, self.last_latency_ms
 
+    def close(self):
+        """无持久的宿主资源（adb 连接由 server 管理），保留接口对齐 WindowCapture。"""
+        pass
+
     @staticmethod
     def _decode_raw(data):
         """解析裸 screencap：16 字节头(w,h,fmt,..) + RGBA8888 像素。失败返回 None。"""
