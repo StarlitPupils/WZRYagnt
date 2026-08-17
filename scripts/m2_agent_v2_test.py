@@ -24,9 +24,9 @@ T = 100.0
 
 def fresh_cd():
     return {"skill1_t": 0.0, "skill2_t": 0.0, "skill3_t": 0.0,
-            "summoner_t": 0.0, "skill": 0.0, "hook_pending": 0.0,
+            "summoner_t": 0.0, "recall_t": 0.0, "hp_t": 0.0,
+            "skill": 0.0, "hook_pending": 0.0,
             "hook_anchor_dist": 0.0, "turret_threat": 0.0}
-
 
 def state(units=None, minimap=None, t=T, screen=(W, H)):
     return {"t": t, "screen_size": list(screen), "units": units or [],
@@ -208,6 +208,57 @@ class TestGuard(unittest.TestCase):
         act = decide(st, cd)
         self.assertEqual(act["type"], "none")
         self.assertEqual(act["reason"], "skill_debounce")
+
+
+class TestRetreat(unittest.TestCase):
+    """低血量撤退（用户规则）：HP<20% 朝泉水跑；身边无危险则回城。"""
+
+    def test_low_hp_safe_recall(self):
+        cd = fresh_cd()
+        st = state(units=[], minimap=mm_found())
+        st["ui"] = {"hp": 0.15}
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "recall")
+        self.assertEqual(act["reason"], "low_hp_safe_recall")
+
+    def test_low_hp_danger_retreat_to_fountain(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.60, 0.50)])  # 0.10 < 0.50 有危险
+        st["ui"] = {"hp": 0.10}
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "retreat_low_hp")
+        # 蓝方泉水 (0.12,0.88) 方向（左下方）
+        exp = math.atan2(-(0.88 - 0.5) * (H / W), 0.12 - 0.5)
+        self.assertAlmostEqual(act["theta"], exp, places=4)
+
+    def test_high_hp_no_retreat(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.75, 0.50)])  # 0.25 在钩子范围
+        st["ui"] = {"hp": 0.8}
+        act = decide(st, cd)
+        self.assertNotEqual(act["type"], "recall")
+        self.assertEqual((act["type"], act.get("id")), ("skill", 2))
+
+
+class TestFollowMinimap(unittest.TestCase):
+    """小地图观察移动（用户规则）：蓝点跟随（射手优先）/ 红点支援。"""
+
+    def test_follow_minimap_blue_nearest_lane(self):
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        st = state(units=[], minimap=mm_found(blue=[[0.7, 0.8], [0.3, 0.3]]))
+        act = decide(st, cd)
+        self.assertEqual(act["reason"], "follow_ally_minimap")
+        # 离发育路 (0.72,0.82) 最近的是 (0.7,0.8) -> 朝右下方
+        exp = math.atan2(-(0.8 - 0.5) * (H / W), 0.7 - 0.5)
+        self.assertAlmostEqual(act["theta"], exp, places=4)
+
+    def test_support_red_centroid(self):
+        cd = fresh_cd()
+        st = state(units=[], minimap=mm_found(red=[[0.6, 0.6]]))
+        act = decide(st, cd)
+        self.assertEqual(act["reason"], "support_red_centroid")
 
 
 if __name__ == "__main__":

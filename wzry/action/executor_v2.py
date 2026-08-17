@@ -92,6 +92,15 @@ class ActionExecutor:
         x, y = PTS["summoner"]
         return self.ex.tap(x, y, source="policy")
 
+    def recall(self):
+        """回城（校准点 recall；点按触发回城读条，持续 7 秒）。"""
+        x, y = PTS["recall"]
+        return self.ex.tap(x, y, source="policy")
+
+
+if __name__ == "__main__":
+    pass
+
     # ---------- 连招 ----------
     def sequence(self, steps, gap_ms: int = 120):
         """连招编排。steps: [(callable, args, kwargs), ...] 或原语 dict 列表。

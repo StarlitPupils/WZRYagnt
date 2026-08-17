@@ -50,6 +50,13 @@ MOVE_DURATION_MS = 2000       # 持续拖动（用户要求：轮盘移动不是
 # 发育路方向（小地图归一化坐标）：由开局阵营决定（蓝方右下 / 红方左上镜像）
 LANE_DIR_BLUE = (0.72, 0.82)
 LANE_DIR_RED = (0.28, 0.18)
+# 己方泉水方向（小地图坐标）：蓝方左下 / 红方右上（镜像）
+FOUNTAIN_DIR_BLUE = (0.12, 0.88)
+FOUNTAIN_DIR_RED = (0.88, 0.12)
+# 低血量撤退（用户规则）：HP < 20% 时朝泉水移动或安全回城
+LOW_HP_FRAC = 0.20
+DANGER_FRAC = 0.50            # 身边有危险：敌方英雄/兵 < 0.5 屏宽
+RECALL_THROTTLE_S = 20.0      # 回城节流（避免反复点）
 # 塔规避：屏幕存在敌方塔且无我方小兵时，移动方向朝塔则偏转远离
 TURRET_SAFE_FRAC = 0.55       # 塔在屏幕内时与移动目标方向冲突判定阈值
 
@@ -131,6 +138,20 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         if now - hook_pending > HOOK_CONFIRM_S:
             cooldowns["hook_pending"] = 0.0
 
+    # ---- 0.5) 低血量撤退（用户规则）：HP<20% 朝泉水跑；身边无危险则回城 ----
+    hp = float((state_dict.get("ui") or {}).get("hp") or 1.0)
+    if hp < LOW_HP_FRAC:
+        dangerous = any(dist_width(s[0], s[1]) < DANGER_FRAC
+                        for s in (enemies + minions))
+        camp = cooldowns.get("camp") or "blue"
+        fx, fy = FOUNTAIN_DIR_BLUE if camp == "blue" else FOUNTAIN_DIR_RED
+        if not dangerous and ready("recall_t", RECALL_THROTTLE_S):
+            cooldowns["recall_t"] = now
+            return {"type": "recall", "reason": "low_hp_safe_recall"}
+        return {"type": "move", "theta": math.atan2(-(fy - 0.5) * aspect, fx - 0.5),
+                "r": 1.0, "duration_ms": MOVE_DURATION_MS,
+                "reason": "retreat_low_hp"}
+
     # ---- 1) 塔规避：敌塔可见且无我方小兵(ally_minion) → 不进入塔攻击范围 ----
     turret_threat = bool(turrets) and not ally_minions
     if turret_threat:
@@ -179,28 +200,36 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         target = (ne[0], ne[1])
         reason = "chase_enemy"
     else:
-        # 帮发育路射手：跟随最近 ally_hero；无队友时朝小地图红点（支援战斗）；
-        # 无红点才朝发育路方向（按阵营镜像）
+        # 移动决策（用户规则：通过小地图观察敌我位置）：
+        #   1) 跟随队友：屏幕 ally_hero 优先；否则小地图蓝点中离发育路最近的（射手优先）
+        #   2) 无队友：朝小地图红点（支援战斗）
+        #   3) 无红点：朝发育路方向（按阵营镜像）
+        camp = cooldowns.get("camp") or "blue"
+        lane = LANE_DIR_BLUE if camp == "blue" else LANE_DIR_RED
+        mm = state_dict.get("minimap") or {}
+        mm_blue, mm_red = [], []
+        if mm.get("found"):
+            mm_blue = (mm.get("dots") or {}).get("blue") or []
+            mm_red = (mm.get("dots") or {}).get("red") or []
+
         na = nearest(allies)
         if na is not None:
             target = (na[0], na[1])
             reason = "follow_ally"
+        elif mm_blue:
+            # 射手优先：离发育路方向最近的蓝点（射手常在发育路）
+            lx, ly = lane
+            target = min(mm_blue, key=lambda p: (p[0] - lx) ** 2 + (p[1] - ly) ** 2)
+            reason = "follow_ally_minimap"
+        elif mm_red:
+            lx = sum(p[0] for p in mm_red) / len(mm_red)
+            ly = sum(p[1] for p in mm_red) / len(mm_red)
+            target = (lx, ly)
+            reason = "support_red_centroid"
         else:
-            camp = cooldowns.get("camp") or "blue"
-            lane = LANE_DIR_BLUE if camp == "blue" else LANE_DIR_RED
-            mm = state_dict.get("minimap") or {}
-            red = []
-            if mm.get("found"):
-                red = (mm.get("dots") or {}).get("red") or []
-            if red:
-                lx = sum(p[0] for p in red) / len(red)
-                ly = sum(p[1] for p in red) / len(red)
-                target = (lx, ly)
-                reason = "support_red_centroid"
-            elif mm.get("found"):
-                lx, ly = lane
-                target = (lx, ly)
-                reason = "lane_develop"
+            lx, ly = lane
+            target = (lx, ly)
+            reason = "lane_develop"
     if target is None:
         return {"type": "none", "reason": "no_target"}
     # 钩子飞行期停止移动（等勾中结果，防自己走近误判连招）
@@ -237,6 +266,9 @@ def update_cooldowns(action: dict, cooldowns: dict, now: float):
     elif t == "summoner":
         cooldowns["summoner_t"] = now
         cooldowns["skill"] = now
+    elif t == "recall":
+        cooldowns["recall_t"] = now
+        cooldowns["skill"] = now
     elif t == "combo":
         for sub in action.get("actions", []):
             update_cooldowns(sub, cooldowns, now)
@@ -271,6 +303,8 @@ def apply_action(ex, action: dict, cooldowns: dict):
         ex.skill_cast(int(action.get("id", 0)), action.get("mode", "tap"))
     elif t == "summoner":
         ex.summoner()
+    elif t == "recall":
+        ex.recall()
     elif t == "combo":
         for i, sub in enumerate(action.get("actions", [])):
             apply_action(ex, sub, cooldowns)
@@ -288,6 +322,8 @@ def format_decision(action: dict) -> str:
         return f"技能{action.get('id')} ({action.get('mode', 'tap')}) [{reason}]"
     if t == "summoner":
         return f"召唤师技能 [{reason}]"
+    if t == "recall":
+        return f"回城 [{reason}]"
     if t == "combo":
         names = [f"{a.get('type')}{a.get('id', '')}" for a in action.get("actions", [])]
         return f"连招 {'→'.join(names)} [{reason}]"
@@ -355,7 +391,8 @@ def main():
 
     recorder = MatchRecorder(base_dir=ROOT / "data" / "matches")
     cooldowns = {"skill1_t": 0.0, "skill2_t": 0.0, "skill3_t": 0.0,
-                 "summoner_t": 0.0, "skill": 0.0, "hook_pending": 0.0,
+                 "summoner_t": 0.0, "recall_t": 0.0, "hp_t": 0.0,
+                 "skill": 0.0, "hook_pending": 0.0,
                  "hook_anchor_dist": 0.0, "turret_threat": 0.0}
 
     # 确认制：状态机判定 in_match 后，还需小地图 tracker 连续 2 帧确认
@@ -431,6 +468,13 @@ def main():
             frame_id += 1
             st.t = time.time()  # 决策时刻
             state_dict = st.to_dict()
+            # 低血量决策：读取 HP（左下角血条，低频 0.5s 一次）
+            if now - float(cooldowns.get("hp_t", 0.0)) >= 0.5:
+                from wzry.vision.ui_reader import find_hp_bar
+                hp_res = find_hp_bar(frame)
+                cooldowns["hp_t"] = now
+                if hp_res:
+                    state_dict.setdefault("ui", {})["hp"] = hp_res[-1]
             n_ticks += 1
             infer_sum += det.last_infer_ms
 
