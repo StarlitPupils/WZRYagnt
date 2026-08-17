@@ -15,4 +15,5 @@ temp/
 runs/
 models/
 logs/
-data/
+/data/
+/temp/
