@@ -73,10 +73,9 @@ class TestHookCombo(unittest.TestCase):
         cd = fresh_cd()
         cd["hook_pending"] = T - 0.2
         cd["hook_anchor_dist"] = 0.20
-        st = state(units=[enemy(0.62, 0.50)])  # 0.12 < 0.144 也缩小了 -> 仍算勾中
+        st = state(units=[enemy(0.62, 0.50)])  # 0.12 缩小 0.08 < 0.12 -> 不算勾中
         act = decide(st, cd)
-        # 距离 0.12 < 0.20*0.72=0.144 -> 勾中
-        self.assertEqual(act["type"], "combo")
+        self.assertNotEqual(act["type"], "combo")
 
     def test_combo_window_expires(self):
         cd = fresh_cd()
@@ -111,13 +110,13 @@ class TestSkill2(unittest.TestCase):
     """规则 2：敌人在二技能范围内 -> 钩子。"""
 
     def test_enemy_in_range_triggers_skill2(self):
-        st = state(units=[enemy(0.85, 0.50)])  # dx=0.35 < 0.42
+        st = state(units=[enemy(0.75, 0.50)])  # dx=0.25 < 0.28（实测射程 0.30）
         act = decide(st, fresh_cd())
         self.assertEqual((act["type"], act["id"]), ("skill", 2))
 
     def test_enemy_out_of_range_no_hook(self):
         cd = fresh_cd()
-        st = state(units=[enemy(0.95, 0.50)])  # dx=0.45 > 0.42
+        st = state(units=[enemy(0.85, 0.50)])  # dx=0.35 > 0.28
         act = decide(st, cd)
         self.assertNotEqual((act["type"], act.get("id")), ("skill", 2))
         self.assertEqual(act["type"], "move")
