@@ -688,12 +688,15 @@ class ActionInferrer:
         while True:
             if max_frames and frames_done >= max_frames:
                 break
-            if real_frame >= n_frames > 0:
+            if n_frames > 0 and real_frame >= n_frames:
                 break
-            cap.set(cv2.CAP_PROP_POS_FRAMES, real_frame)
+            # 顺序读取（避免 set(POS_FRAMES)+read 对损坏 mkv 的解码不稳定）
             ret, frame = cap.read()
             if not ret:
                 break
+            if sample_every > 1 and real_frame % sample_every != 0:
+                real_frame += 1
+                continue
             do_yolo = (self.chC.enabled and
                        (frames_done % max(1, yolo_every) == 0))
             if not do_yolo:
