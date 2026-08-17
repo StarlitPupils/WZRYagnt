@@ -58,7 +58,9 @@ def main():
     # 动作编码布局（与 encoding.encode_action 一致）
     # [0:6) one-hot: move/skill/attack/buy/recall/none, [6]=theta_norm, [7]=r, [8:10]=target
     act_onehot = actions[:, :6]
-    act_theta = actions[:, 6] * (2 * np.pi + 1e-6)   # 还原角度
+    # 移动方向：连续弧度 -> 8 向 bin（0-7）
+    theta_rad = (actions[:, 6] * (2 * np.pi + 1e-6)) % (2 * np.pi)
+    act_theta = ((theta_rad / (2 * np.pi)) * 8).long() % 8
     act_r = actions[:, 7]
     act_target = actions[:, 8:10]
 
