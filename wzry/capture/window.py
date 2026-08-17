@@ -12,7 +12,10 @@ import win32gui
 
 
 def find_mumu_window(title_keyword="MuMu"):
-    """返回第一个可见且标题含关键字的窗口句柄；找不到返回 None。"""
+    """返回第一个可见且标题含关键字的窗口句柄；找不到返回 None。
+
+    注意：多实例/多窗口时标题匹配不可靠，优先用 mumu_render_hwnd()。
+    """
     hwnds = []
 
     def callback(hwnd, _):
@@ -26,18 +29,92 @@ def find_mumu_window(title_keyword="MuMu"):
     return hwnds[0] if hwnds else None
 
 
-class WindowCapture:
-    """窗口截图器：get_frame() 返回 (frame, latency_ms)；失败返回 (None, 0)。"""
+def find_largest_mumu_window(title_keyword="MuMu"):
+    """返回可见且标题含关键字、客户区面积最大的窗口（多窗口时的兜底选择）。"""
+    best = None
+    best_area = -1
 
-    def __init__(self, title_keyword="MuMu"):
+    def callback(hwnd, _):
+        nonlocal best, best_area
+        if not win32gui.IsWindowVisible(hwnd):
+            return True
+        title = win32gui.GetWindowText(hwnd)
+        if title_keyword not in title:
+            return True
+        try:
+            r = win32gui.GetClientRect(hwnd)
+            area = r[2] * r[3]
+            if area > best_area:
+                best, best_area = hwnd, area
+        except Exception:
+            pass
+        return True
+
+    win32gui.EnumWindows(callback, None)
+    return best
+
+
+def mumu_render_hwnd(manager_paths=None, vm_index=0):
+    """从 MuMuManager 查询指定实例的游戏渲染窗口句柄（render_wnd）。
+
+    返回 hwnd 或 None。manager_paths 默认探测常见 MuMu12 安装路径。
+    """
+    import json
+    import subprocess
+    from pathlib import Path
+
+    defaults = [
+        r"E:\MuMuPlayer\nx_main\MuMuManager.exe",
+        r"C:\Program Files\Netease\MuMu Player 12\shell\MuMuManager.exe",
+        r"D:\Program Files\Netease\MuMu Player 12\shell\MuMuManager.exe",
+        r"C:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe",
+        r"D:\Program Files\Netease\MuMu\nx_main\MuMuManager.exe",
+    ]
+    for p in (manager_paths or defaults):
+        if not Path(p).exists():
+            continue
+        try:
+            r = subprocess.run([p, "info", "-v", "all"],
+                               capture_output=True, timeout=10)
+            out = r.stdout.decode("utf-8", errors="replace")
+            data = json.loads(out)
+            vm = data.get(str(vm_index), {})
+            hw = vm.get("render_wnd")
+            if hw:
+                return int(hw, 16)
+        except Exception:
+            continue
+    return None
+
+
+class WindowCapture:
+    """窗口截图器：get_frame() 返回 (frame, latency_ms)；失败返回 (None, 0)。
+
+    窗口选择优先级：显式 hwnd > MuMuManager render_wnd（游戏渲染窗口）> 最大 MuMu 标题窗口。
+    """
+
+    def __init__(self, title_keyword="MuMu", hwnd=None, prefer_render=True, vm_index=0):
         self.title_keyword = title_keyword
-        self.hwnd = None
+        self.prefer_render = prefer_render
+        self.vm_index = vm_index
         self.sct = mss.mss()
         self.last_latency_ms = 0.0
+        self.hwnd = None
+        if hwnd:
+            self.hwnd = hwnd
+        elif prefer_render:
+            self.hwnd = mumu_render_hwnd(vm_index=vm_index) or None
 
     def find_window(self):
-        self.hwnd = find_mumu_window(self.title_keyword)
-        return self.hwnd is not None
+        if self.hwnd and win32gui.IsWindow(self.hwnd):
+            return self.hwnd
+        if self.prefer_render:
+            hw = mumu_render_hwnd(vm_index=self.vm_index)
+            if hw and win32gui.IsWindow(hw):
+                self.hwnd = hw
+                return hw
+        self.hwnd = find_largest_mumu_window(self.title_keyword)
+        return self.hwnd
 
     def get_frame(self):
         t0 = time.perf_counter()
