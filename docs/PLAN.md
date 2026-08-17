@@ -17,11 +17,11 @@
 > - ✅ **动作验证（训练营实测）**：skill1/2/3、restore、summoner、主动装备点击全部命中（ROI 变化 39-53）；摇杆 swipe 上/右移动生效（小地图蓝点位移 0.106/0.181）。
 > - ✅ **对局状态机**：小地图暗圆+阵营色点启发式 + 滞回防抖（进局 5 帧、离局 15 帧），实测定稳不再抖动。
 > - ✅ **YOLO 检测封装**：`wzry/vision/detector.py`，推理 17-30ms（GPU）。
-> - ✅ **小地图感知**：`wzry/vision/minimap.py`（子代理开发，多方法定位+圆点分类+结构门控）+ `wzry/vision/minimap_tracker.py`（固定圆心半径扫描跟踪，跟踪单帧 86-273ms，全扫描 1.1s）。录像对局帧定位 63/81（78%，含非对局帧），菜单假阳性被门控正确拒绝。
+> - ✅ **小地图感知**：`wzry/vision/minimap.py`（多方法定位+圆点结构门控：每阵营英雄点 1-5、平均距心 ≤0.90r、盘缘占比 ≤0.6）+ `wzry/vision/minimap_tracker.py`（固定圆心半径扫描跟踪）。**验证矩阵**：合成帧回归完美（圆心误差 0px，蓝3/红2/黄1/塔4 全对）；实时训练营对局稳定（蓝2/红3-4，跟踪 155-186ms）；菜单正确拒绝。**已知局限（诚实记录）**：现有录像 tmphjhl7fk3.mp4 是自由视角无 HUD，场景段单帧假阳性 ~40%（圆心漂移 69.8px 证实为场景误报）——实时管线用 tracker 固定圆心+跨帧一致性天然免疫；fast_prior 324ms 待优化。
 > - ✅ **对局数据采集器**：`wzry/data/collector.py`（MatchRecorder）——按对局会话分目录存档 states.jsonl / frames/ / actions.jsonl / manifest.json，已集成进 m1_live_pipeline。
 > - ✅ **UI 数值读取器 v0**：`wzry/vision/ui_reader.py`——血条自动定位（绿色带检测）+ 技能冷却遮罩占比，待真实对局标定阈值。
 > - ✅ **11 类标签迁移**：`scripts/train/migrate_labels_11class.py`——466 文件 1379 框迁移（带备份），294 个歧义文件清单已生成，data.yaml 更新为 11 类。
-> - ⏳ 待办：11 类 ally 类补标（人工复核歧义清单）；检测器升级 11 类重训；UI 数值阈值标定；真人局验证（训练营→人机→匹配）；录像 HUD 段真值库建设（现有录像仅 ~12s 含 HUD）。
+> - ⏳ 待办：11 类 ally 类补标（人工复核歧义清单，见 docs/ANNOTATION_GUIDE.md）；检测器升级 11 类重训；UI 数值阈值标定；真人局验证（训练营→人机→匹配）；fast_prior 性能优化。
 
 ---
 
