@@ -23,9 +23,9 @@
 > - ✅ **11 类标签迁移**：`scripts/train/migrate_labels_11class.py`——466 文件 1379 框迁移（带备份），294 个歧义文件清单已生成，data.yaml 更新为 11 类。
 > - ✅ **数据扩充与阵营预判**：录像抽帧 +150 帧/377 框（数据集 367 图/1317 框）；`camp_autolabel.py`（血条颜色判定，216 个高置信 ally 建议 + 联系表抽查）。
 > - ✅ **数据泄漏修复**：prepare_dataset 多次运行导致 train/val 重叠（237 个重复框键）——重建后归零，验证指标可信。
-> - ✅ **11 类实验训练**（v2 实验集，40 轮）：管线端到端跑通（沙盒兼容模式），整体 mAP50=0.511；enemy_turret 0.871 / enemy_hero 0.787 / enemy_minion 0.563 强；ally_hero/ally_minion/ally_turret 样本少但可学（0.20-0.54）。空类（水晶/野怪/特效）待补标。当前正式版：`runs/detect/zhongkui_11cls/weights/best.pt`（40 轮）。
-> - ⚠️ 120 轮全量训练在沙盒环境因模拟器抢占 GPU（58%）卡死（26 轮后停滞）——待用户环境（关模拟器或减少占用）或补标后重跑。
-> - ⏳ 待办：补标空类（水晶×2/野怪/skill_effect，见 docs/ANNOTATION_GUIDE.md）；用户抽查 camp 建议后 --apply 落盘主数据；全量 11 类重训；真人局验证；UI 数值阈值标定。
+> - ✅ **11 类全量训练**（80 轮，含 ally 类数据）：整体 **mAP50=0.633**（40 轮 0.511 → +0.12）；enemy_hero 0.857 / ally_hero 0.593 / ally_minion 0.499 / ally_turret 0.658 / enemy_turret 0.747 / hook_aim 0.537。正式版：`runs/detect/zhongkui_11cls/weights/best.pt`。⚠️ 训练时模拟器需空闲（对局渲染抢 GPU 会卡死）。
+> - ✅ **真局验证两轮**（用户配合）：小地图真局稳定（蓝/红/黄点检出）、11 类模型真局检出（minion/turret/hero/ally_turret）、技能冷却 dark_frac 基准（~0.3 就绪/~0.5 冷却）、HP 血条检测修复（水平条结构+放宽阈值，真局验证满血 1.0）。
+> - ⏳ 待办：补标空类（水晶×2/野怪/skill_effect，见 docs/ANNOTATION_GUIDE.md）；新模型最终真局验证；UI 阈值终标定；真人局验证。
 
 ---
 
