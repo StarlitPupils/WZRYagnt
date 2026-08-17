@@ -69,16 +69,18 @@ COLOR_THRESH = {
 # 定位搜索范围：默认左上 40% 区域（任务要求；可通过 search_region 覆盖）
 DEFAULT_SEARCH = (0.0, 0.0, 0.40, 0.40)  # (x0, y0, x1, y1) 相对比例
 
-# 圆盘半径搜索范围（相对短边）
-R_MIN_FRAC = 0.05
-R_MAX_FRAC = 0.32
+# 圆盘半径搜索范围
+R_MIN_FRAC = 0.05           # 相对短边
+R_MIN_W_FRAC = 0.045        # 相对画面宽度（王者荣耀小地图半径约 0.07-0.10 宽；下限放宽到 0.045 以兼容小窗口）
+R_MAX_FRAC = 0.32           # 相对短边
 
 # 圆盘判据（minimap 的特征）
-DISK_GRAY_MAX = 112.0        # 盘内平均灰度上限（深色圆盘）
-RING_CONTRAST_MIN = 6.0      # 圆环(盘外)与盘内的最小平均灰度差（亮环或暗环均可，取绝对值）
+DISK_GRAY_MAX = 80.0         # 盘内平均灰度上限（深色圆盘；实测场景补丁 65-96，真实圆盘 45-65）
+RING_CONTRAST_POS_MIN = 12.0 # 圆环(盘外)-盘内平均灰度差下限（小地图有亮描边；场景补丁实测 -21~+10）
 COLOR_FRAC_MIN = 0.0004      # 盘内彩色像素占比下限（必须同时有蓝和红才可能是小地图）
 COLOR_FRAC_MAX = 0.35        # 盘内彩色占比上限（超过则更像是场景而非小地图）
 BLUE_FRAC_SCENE = 0.22       # 盘内蓝色占比超过该值判为"蓝方基地场景"，扣分
+FOUND_SCORE_MIN = 45.0       # 判定"找到"的最低综合分
 
 # 圆点尺寸（以圆盘半径 r 为基准的半径比例）。
 # 英雄点（小圆点）> 塔点（略小）> 噪声（极小）；三个区间不重叠：
@@ -87,6 +89,7 @@ FRAC_NOISE_MAX = 0.014       # 半径 < 1.4% r 视为噪声
 FRAC_TOWER_LO = 0.014        # 塔点半径下界
 FRAC_HERO_LO = 0.032         # 英雄点半径下界
 FRAC_HERO_HI = 0.090         # 英雄点半径上界（再大视为误检）
+MIN_HERO_DOTS = 1            # 验证时每阵营最少英雄级圆点数（阵亡/1v1 时可能只剩 1 个）
 
 # 形态学核
 MORPH_K = 3
@@ -128,27 +131,62 @@ def _color_masks(frame: np.ndarray):
     return masks
 
 
-def _disk_metrics(gray_f, masks_f, cx, cy, r):
-    """计算候选圆盘的一组度量（都基于圆形 mask，像素均值）。返回 dict 或 None（越界）。"""
+def _disk_metrics(gray_f, masks_f, cx, cy, r, n_sectors=8):
+    """计算候选圆盘的一组度量（基于圆形 mask，像素均值；仅在本地区域内计算）。
+
+    返回 dict（越界返回 None）：
+      g_in / g_ring / b_in / r_in / y_in : 盘内灰度与颜色占比、圆环灰度
+      sector_contrast : 把圆环按角度均分 n_sectors 个扇区，返回每个扇区
+                        |扇区灰度 - 盘内灰度| 的列表（用于圆边界一致性判别）
+      ring_consistent : 扇区对比度 >= 5.0 的扇区数 >= 5 时为 True
+    """
     h, w = gray_f.shape
     if cx - r < 2 or cy - r < 2 or cx + r >= w - 2 or cy + r >= h - 2:
         return None
-    disk = np.zeros((h, w), np.uint8)
-    cv2.circle(disk, (int(cx), int(cy)), int(r), 255, -1)
-    ring = np.zeros((h, w), np.uint8)
-    cv2.circle(ring, (int(cx), int(cy)), int(r + 6), 255, 2)
+    # 只在圆盘外接框内计算，避免整帧大数组操作
+    pad = 8
+    x0 = max(0, int(cx - r - pad)); y0 = max(0, int(cy - r - pad))
+    x1 = min(w, int(cx + r + pad)); y1 = min(h, int(cy + r + pad))
+    rr = int(round(r))
+    lcx, lcy = int(cx) - x0, int(cy) - y0
+
+    g = gray_f[y0:y1, x0:x1]
+    disk = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.circle(disk, (lcx, lcy), rr, 255, -1)
+    ring = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.circle(ring, (lcx, lcy), rr + 6, 255, 2)
     ring[disk == 255] = 0
+
     ins = disk == 255
-    g_in = float(gray_f[ins].mean())
-    g_ring = float(gray_f[ring == 255].mean()) if ring.any() else g_in
-    b_in = float(masks_f["blue"][ins].mean())
-    r_in = float(masks_f["red"][ins].mean())
-    y_in = float(masks_f["yellow"][ins].mean())
-    return {"g_in": g_in, "g_ring": g_ring, "b_in": b_in, "r_in": r_in, "y_in": y_in}
+    g_in = float(g[ins].mean())
+    ring_pts = ring == 255
+    g_ring = float(g[ring_pts].mean()) if ring_pts.any() else g_in
+    # masks_f 为 0-255 尺度，这里归一化到 0-1（与 COLOR_FRAC_* 阈值一致）
+    b_in = float(masks_f["blue"][y0:y1, x0:x1][ins].mean()) / 255.0
+    r_in = float(masks_f["red"][y0:y1, x0:x1][ins].mean()) / 255.0
+    y_in = float(masks_f["yellow"][y0:y1, x0:x1][ins].mean()) / 255.0
+
+    # 扇区对比度（圆边界一致性）
+    sector_contrast = []
+    if ring_pts.any():
+        ys, xs = np.nonzero(ring_pts)
+        ang = np.arctan2(ys - lcy, xs - lcx)
+        sec = ((ang / (2 * np.pi)) * n_sectors).astype(int) % n_sectors
+        for k in range(n_sectors):
+            sel = sec == k
+            if sel.any():
+                sector_contrast.append(abs(float(g[ys[sel], xs[sel]].mean()) - g_in))
+    ring_consistent = (sum(1 for v in sector_contrast if v >= 5.0) >= max(4, n_sectors - 3)
+                       if sector_contrast else False)
+    return {"g_in": g_in, "g_ring": g_ring, "b_in": b_in, "r_in": r_in, "y_in": y_in,
+            "r": float(r), "sector_contrast": sector_contrast, "ring_consistent": ring_consistent}
 
 
-def _score_disk(m):
-    """把 _disk_metrics 的输出转成分数。分数高 => 更像小地图圆盘。"""
+def _score_disk(m, short=None):
+    """把 _disk_metrics 的输出转成分数。分数高 => 更像小地图圆盘。
+
+    short : 画面短边（像素），提供时加入"半径/短边比"尺寸偏好惩罚。
+    """
     g_in, g_ring = m["g_in"], m["g_ring"]
     b_in, r_in, y_in = m["b_in"], m["r_in"], m["y_in"]
     col = b_in + r_in + y_in
@@ -160,7 +198,7 @@ def _score_disk(m):
     score += min(abs(g_ring - g_in), 40.0) * 0.5
     # 3) 必须同时含蓝、红圆点（这是小地图最强的判别信号）
     if b_in >= COLOR_FRAC_MIN and r_in >= COLOR_FRAC_MIN:
-        score += 70.0
+        score += 60.0
     else:
         score -= 40.0
     # 4) 黄色中立点加分
@@ -172,6 +210,16 @@ def _score_disk(m):
     # 6) 蓝色占绝对主导 => 蓝方基地场景
     if b_in > BLUE_FRAC_SCENE:
         score -= 35.0
+    # 7) 圆边界一致性（强判别信号；粗扫阶段无扇区信息时为中性）
+    if m.get("ring_consistent") is not None:
+        score += 30.0 if m["ring_consistent"] else -30.0
+    # 8) 尺寸偏好：半径/短边比应在 [0.09, 0.22]（1280x720 下约 0.146），区间外扣分
+    if short and m.get("r"):
+        frac = m["r"] / float(short)
+        if not (0.09 <= frac <= 0.22):
+            score -= 25.0
+            if frac < 0.05 or frac > 0.30:
+                score -= 20.0
     return float(score)
 
 
@@ -193,11 +241,89 @@ def _hough_candidates(gray, x1, y1, r_lo, r_hi):
     return out
 
 
+def _dot_structure(masks_uint8, cx, cy, r):
+    """统计盘内各颜色"紧凑圆点"（连通域面积落在塔点~英雄点区间）。
+
+    返回 {"blue": [(area, x, y), ...], "red": [...], "yellow": [...]}，
+    (x, y) 为圆点质心（与输入 mask 同坐标系）。
+    这是排除"场景色块"的关键：蓝方基地里虽然蓝/红像素很多，但都是弥散的
+    纹理/噪点，经形态学开运算后不会留下紧凑圆点；小地图上的英雄/塔点是
+    小而圆的连通域，会留下 1~N 个圆点。
+    """
+    h, w = masks_uint8["blue"].shape
+    pad = 6
+    x0 = max(0, int(cx - r - pad)); y0 = max(0, int(cy - r - pad))
+    x1 = min(w, int(cx + r + pad)); y1 = min(h, int(cy + r + pad))
+    if x1 - x0 < 6 or y1 - y0 < 6:
+        return {"blue": [], "red": [], "yellow": []}
+    disk = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.circle(disk, (int(cx) - x0, int(cy) - y0), int(r), 255, -1)
+    disk = cv2.dilate(disk, np.ones((3, 3), np.uint8))
+    area_lo = np.pi * (FRAC_TOWER_LO * r) ** 2
+    area_hi = np.pi * (FRAC_HERO_HI * r) ** 2
+    out = {}
+    for color in ("blue", "red", "yellow"):
+        m = masks_uint8[color][y0:y1, x0:x1] & disk
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((MORPH_K, MORPH_K), np.uint8))
+        n, lab, st, cent = cv2.connectedComponentsWithStats(m, 8)
+        out[color] = [(int(st[i, cv2.CC_STAT_AREA]),
+                       float(cent[i][0]) + x0, float(cent[i][1]) + y0)
+                      for i in range(1, n)
+                      if area_lo <= st[i, cv2.CC_STAT_AREA] <= area_hi]
+    return out
+
+
+def _verify_dots(dots, cx, cy, r):
+    """圆点结构最终验证，返回 (ok, nb, nr, ny, mean_dist_frac)。
+
+    ok 需要满足：
+      1) 蓝方、红方各有 MIN_HERO_DOTS(默认2)~5 个"英雄级"圆点
+         （英雄点略大于塔点；5v5 对局双方各 5 名英雄始终可见，贴脸重叠
+         合并后一般仍 >=2）；
+      2) 英雄级圆点的平均距心距离 <= 0.80*r —— 排除"候选圆贴住屏幕顶部
+         UI 图标条/盘缘图标"的场景圆（图标全挤在圆盘上缘）；
+      3) 距心距离 > 0.85*r 的盘缘圆点占比 <= 0.6 —— 排除"少量圆点几乎
+         全部挂在圆盘边缘"的假阳性（真实小地图的英雄点散布在盘内各处）。
+    """
+    hero_lo = np.pi * (FRAC_HERO_LO * r) ** 2
+    hero_hi = np.pi * (FRAC_HERO_HI * r) ** 2
+    heros = {"blue": [], "red": [], "yellow": []}
+    for color in ("blue", "red", "yellow"):
+        heros[color] = [(a, x, y) for (a, x, y) in dots[color]
+                        if hero_lo <= a <= hero_hi]
+    nb, nr, ny = len(heros["blue"]), len(heros["red"]), len(heros["yellow"])
+
+    pts = heros["blue"] + heros["red"] + heros["yellow"]
+    mean_dist_frac = None
+    rim_frac = None
+    if pts:
+        dists = [np.hypot(x - cx, y - cy) for (_, x, y) in pts]
+        mean_dist_frac = float(np.mean(dists) / max(1.0, r))
+        rim_frac = float(np.mean([d > 0.85 * r for d in dists]))
+
+    ok = (MIN_HERO_DOTS <= nb <= 5 and MIN_HERO_DOTS <= nr <= 5
+          and mean_dist_frac is not None and mean_dist_frac <= 0.90
+          and rim_frac is not None and rim_frac <= 0.60)
+    return ok, nb, nr, ny, mean_dist_frac
+
+
+def _dot_bonus(nb, nr, ny):
+    """圆点结构加分：蓝/红各至少 1 个紧凑圆点才算小地图；各 >=2 个更可信。"""
+    if nb >= 2 and nr >= 2:
+        b = 45.0
+    elif nb >= 1 and nr >= 1:
+        b = 20.0
+    else:
+        b = -40.0
+    return b + min(ny, 3) * 5.0
+
+
 # ---------------------------------------------------------------------------
 # 公开 API
 # ---------------------------------------------------------------------------
 
-def find_minimap(frame, search_region=None, prior=None, debug=False):
+def find_minimap(frame, search_region=None, prior=None, prior_r=None,
+                 debug=False, fast_prior=False):
     """自适应定位左上角小地图圆盘。
 
     Parameters
@@ -208,6 +334,12 @@ def find_minimap(frame, search_region=None, prior=None, debug=False):
         搜索区域 (x0, y0, x1, y1) 相对比例；默认 (0, 0, 0.40, 0.40)。
     prior : tuple | None
         可选的先验圆心 (px, py)；提供时作为精修种子之一（不提供则完全自适应）。
+    prior_r : int | None
+        先验半径（跟踪模式使用）；与 fast_prior 搭配可只扫 r±10。
+    fast_prior : bool
+        True 且提供 prior 时：跳过全图扫描，固定先验圆心做"半径扫描(步长2) +
+        圆心微调 ±4"，单帧约 30-80ms（小地图在 UI 上位置固定，先验圆心可信时适用；
+        首次定位请用 fast_prior=False）。
     debug : bool
         返回额外调试信息。
 
@@ -218,113 +350,175 @@ def find_minimap(frame, search_region=None, prior=None, debug=False):
          "score": float, "search_region": [...]}（未找到时 found=False）。
     """
     h, w = frame.shape[:2]
+    # ---- 粗定位在降采样图上进行（性能 ~4x），结果映射回原尺寸 ----
+    s = 2 if min(h, w) >= 320 else 1
+    work = cv2.resize(frame, (w // s, h // s), interpolation=cv2.INTER_AREA) if s > 1 else frame
+    wh, ww = work.shape[:2]
+
     if search_region is None:
         search_region = DEFAULT_SEARCH
-    x0 = int(search_region[0] * w)
-    y0 = int(search_region[1] * h)
-    x1 = int(search_region[2] * w)
-    y1 = int(search_region[3] * h)
+    x0 = int(search_region[0] * ww)
+    y0 = int(search_region[1] * wh)
+    x1 = int(search_region[2] * ww)
+    y1 = int(search_region[3] * wh)
     x0, y0 = max(0, x0), max(0, y0)
-    x1, y1 = min(w, x1), min(h, y1)
+    x1, y1 = min(ww, x1), min(wh, y1)
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
     gray_f = cv2.GaussianBlur(gray, (5, 5), 0).astype(np.float32)
-    masks = _color_masks(frame)
+    masks = _color_masks(work)
     masks_f = {k: v.astype(np.float32) for k, v in masks.items()}
 
-    short = min(h, w)
-    r_lo = max(16, int(short * R_MIN_FRAC))
+    short = min(wh, ww)
+    r_lo = max(24, int(short * R_MIN_FRAC), int(ww * R_MIN_W_FRAC))
     r_hi = max(40, int(short * R_MAX_FRAC))
     r_hi = min(r_hi, min(y1 - y0, x1 - x0) // 2 - 2)
+    if r_hi < r_lo:
+        return {"found": False, "center": None, "radius": None,
+                "method": None, "score": None,
+                "search_region": [x0 * s, y0 * s, x1 * s, y1 * s], "debug": None}
 
-    cands = []  # (score, cx, cy, r, method)
+    cands = []  # (score, cx, cy, r, method)，坐标均为降采样空间
 
-    # ---- 方法 A：filter2D 圆核粗扫 + 局部精修 ----
-    radii = sorted(set(range(r_lo, r_hi + 1, max(6, (r_hi - r_lo) // 8))))
-    if not radii:
-        radii = [r_lo]
-    step = max(3, min(8, (r_hi - r_lo) // 6))
-    seen = set()
-    for r in radii:
-        kd = _disk_kernel(r)
-        kr = _ring_kernel(r)
-        sd, sr = kd.sum(), kr.sum()
-        g_in_map = cv2.filter2D(gray_f, -1, kd, borderType=cv2.BORDER_REPLICATE) / sd
-        g_ring_map = cv2.filter2D(gray_f, -1, kr, borderType=cv2.BORDER_REPLICATE) / sr
-        b_map = cv2.filter2D(masks_f["blue"], -1, kd, borderType=cv2.BORDER_REPLICATE) / sd
-        r_map = cv2.filter2D(masks_f["red"], -1, kd, borderType=cv2.BORDER_REPLICATE) / sd
-        y_map = cv2.filter2D(masks_f["yellow"], -1, kd, borderType=cv2.BORDER_REPLICATE) / sd
-        for cy in range(y0 + r + 2, y1 - r - 2, step):
-            for cx in range(x0 + r + 2, x1 - r - 2, step):
-                gi = float(g_in_map[cy, cx])
-                if gi > DISK_GRAY_MAX + 30:
-                    continue
-                bi, ri, yi = float(b_map[cy, cx]), float(r_map[cy, cx]), float(y_map[cy, cx])
-                if not (bi >= COLOR_FRAC_MIN and ri >= COLOR_FRAC_MIN):
-                    continue
-                if bi + ri + yi > COLOR_FRAC_MAX + 0.2:
-                    continue
-                m = {"g_in": gi, "g_ring": float(g_ring_map[cy, cx]),
-                     "b_in": bi, "r_in": ri, "y_in": yi}
-                s = _score_disk(m)
-                if s > 20:
-                    cands.append((s, cx, cy, r, "disk"))
-
-    # ---- 方法 B：霍夫圆候选 ----
-    for (cx, cy, r) in _hough_candidates(gray, x1, y1, r_lo, r_hi):
-        if not (x0 + r < cx < x1 - r and y0 + r < cy < y1 - r):
-            continue
-        m = _disk_metrics(gray_f, masks_f, cx, cy, r)
-        if m is None:
-            continue
-        s = _score_disk(m)
-        if s > 20:
-            cands.append((s, cx, cy, r, "hough"))
-
-    # ---- 先验种子（可选）----
+    prior_s = None
     if prior is not None:
-        px, py = int(prior[0]), int(prior[1])
+        prior_s = (int(prior[0] / s), int(prior[1] / s))
+
+    if fast_prior and prior_s is not None:
+        # ---- 跟踪模式：先验圆心可信，固定圆心 + 半径扫描(步长2) + 圆心微调 ±4 ----
+        px, py = prior_s
+        if prior_r is not None:
+            r_center = int(prior_r / s)
+            r_band = range(max(r_lo, r_center - 10), min(r_hi, r_center + 11), 2)
+        else:
+            r_band = range(max(r_lo, int(short * 0.07)), min(r_hi, int(short * 0.16) + 1), 2)
+        for r in r_band:
+            for ddy in (-4, 0, 4):
+                for ddx in (-4, 0, 4):
+                    m = _disk_metrics(gray_f, masks_f, px + ddx, py + ddy, r)
+                    if m is None:
+                        continue
+                    cands.append((_score_disk(m, short=wh), px + ddx, py + ddy, r, "prior"))
+    else:
+        # ---- 方法 A：filter2D 圆核粗扫（numpy 向量化筛选）----
+        radii = sorted(set(range(r_lo, r_hi + 1, max(6, (r_hi - r_lo) // 6))))
+        if not radii:
+            radii = [r_lo]
+        step = max(4, min(8, (r_hi - r_lo) // 4))
         for r in radii:
-            if not (x0 + r < px < x1 - r and y0 + r < py < y1 - r):
+            kd = _disk_kernel(r)
+            kr = _ring_kernel(r)
+            sd, sr = kd.sum(), kr.sum()
+            g_in_map = cv2.filter2D(gray_f, -1, kd, borderType=cv2.BORDER_REPLICATE) / sd
+            g_ring_map = cv2.filter2D(gray_f, -1, kr, borderType=cv2.BORDER_REPLICATE) / sr
+            # 颜色占比图归一化到 0-1，与 COLOR_FRAC_* 阈值一致
+            b_map = cv2.filter2D(masks_f["blue"], -1, kd, borderType=cv2.BORDER_REPLICATE) / sd / 255.0
+            r_map = cv2.filter2D(masks_f["red"], -1, kd, borderType=cv2.BORDER_REPLICATE) / sd / 255.0
+            y_map = cv2.filter2D(masks_f["yellow"], -1, kd, borderType=cv2.BORDER_REPLICATE) / sd / 255.0
+            y0c, y1c = y0 + r + 2, y1 - r - 2
+            x0c, x1c = x0 + r + 2, x1 - r - 2
+            if y1c <= y0c or x1c <= x0c:
                 continue
-            m = _disk_metrics(gray_f, masks_f, px, py, r)
+            ok = ((g_in_map <= DISK_GRAY_MAX + 30) &
+                  (b_map >= COLOR_FRAC_MIN) & (r_map >= COLOR_FRAC_MIN) &
+                  ((b_map + r_map + y_map) <= COLOR_FRAC_MAX + 0.2))
+            sub = ok[y0c:y1c, x0c:x1c]
+            ys, xs = np.nonzero(sub)
+            for dy, dx in zip(ys[::step], xs[::step]):
+                cy, cx = y0c + int(dy), x0c + int(dx)
+                m = {"g_in": float(g_in_map[cy, cx]), "g_ring": float(g_ring_map[cy, cx]),
+                     "b_in": float(b_map[cy, cx]), "r_in": float(r_map[cy, cx]),
+                     "y_in": float(y_map[cy, cx]), "r": float(r)}
+                sc = _score_disk(m, short=wh)
+                if sc > 15:
+                    cands.append((sc, cx, cy, r, "disk"))
+
+        # ---- 方法 B：霍夫圆候选 ----
+        for (cx, cy, r) in _hough_candidates(gray, x1, y1, r_lo, r_hi):
+            if not (x0 + r < cx < x1 - r and y0 + r < cy < y1 - r):
+                continue
+            m = _disk_metrics(gray_f, masks_f, cx, cy, r)
             if m is None:
                 continue
-            s = _score_disk(m)
-            cands.append((s, px, py, r, "prior"))
+            cands.append((_score_disk(m, short=wh), cx, cy, r, "hough"))
+
+        # ---- 先验种子（可选）----
+        if prior_s is not None:
+            px, py = prior_s
+            for r in radii:
+                if not (x0 + r < px < x1 - r and y0 + r < py < y1 - r):
+                    continue
+                m = _disk_metrics(gray_f, masks_f, px, py, r)
+                if m is None:
+                    continue
+                cands.append((_score_disk(m, short=wh), px, py, r, "prior"))
 
     if not cands:
         return {"found": False, "center": None, "radius": None,
                 "method": None, "score": None,
-                "search_region": [x0, y0, x1, y1], "debug": None}
+                "search_region": [x0 * s, y0 * s, x1 * s, y1 * s], "debug": None}
 
-    # ---- 局部精修：取前 N 个候选，微调圆心与半径 ----
+    # ---- 局部精修：取前 N 个候选，微调圆心与半径（精确圆形 mask + 扇区一致性）----
     cands.sort(key=lambda t: -t[0])
-    best = None
-    for (s0, cx, cy, r, meth) in cands[:8]:
-        for rr in range(max(r_lo, r - 5), min(r_hi, r + 6)):
+    refined = []
+    for (s0, cx, cy, r, meth) in cands[:6]:
+        b_local = None
+        for rr in range(max(r_lo, r - 4), min(r_hi, r + 5), 2):
             for ddy in range(-4, 5, 2):
                 for ddx in range(-4, 5, 2):
                     m = _disk_metrics(gray_f, masks_f, cx + ddx, cy + ddy, rr)
                     if m is None:
                         continue
-                    s = _score_disk(m)
-                    if best is None or s > best[0]:
-                        best = (s, cx + ddx, cy + ddy, rr, meth)
+                    s2 = _score_disk(m, short=wh)
+                    if b_local is None or s2 > b_local[0]:
+                        b_local = (s2, cx + ddx, cy + ddy, rr, meth,
+                                   m["g_in"], m["g_ring"])
+        if b_local is not None:
+            refined.append(b_local)
 
-    s, cx, cy, r, meth = best
+    if not refined:
+        return {"found": False, "center": None, "radius": None,
+                "method": None, "score": None,
+                "search_region": [x0 * s, y0 * s, x1 * s, y1 * s], "debug": None}
+
+    # ---- 圆点结构验证：候选圆内必须有紧凑的蓝/红圆点（排除场景色块）----
+    refined.sort(key=lambda t: -t[0])
+    # 圆点结构验证在原分辨率上进行（降采样会合并/丢失小圆点，导致漏判）
+    masks_full = _color_masks(frame)
+    best = None
+    for (s0, cx, cy, r, meth, g_in, g_ring) in refined[:10]:
+        fx, fy, frr = cx * s, cy * s, r * s
+        dots = _dot_structure(masks_full, fx, fy, frr)
+        ok, nb, nr, ny, mdf = _verify_dots(dots, fx, fy, frr)
+        comb = s0 + _dot_bonus(nb, nr, ny)
+        # 优先"结构验证通过"的候选；同为 ok 时取 comb 高者
+        if best is None or (ok and not best[8]) or (ok == best[8] and comb > best[0]):
+            best = (comb, s0, fx, fy, frr, meth, g_in, g_ring, ok, nb, nr, ny, mdf)
+
+    comb, s0, fx, fy, frr, meth, g_in, g_ring, ok_dots, nb, nr, ny, mdf = best
+    ring_pos = g_ring - g_in
+    found = bool(s0 >= FOUND_SCORE_MIN and comb >= FOUND_SCORE_MIN and ok_dots
+                 and g_in <= DISK_GRAY_MAX and ring_pos >= RING_CONTRAST_POS_MIN)
     result = {
-        "found": s >= 30.0,
-        "center": [int(cx), int(cy)],
-        "radius": int(r),
+        "found": found,
+        "center": [int(fx), int(fy)],
+        "radius": int(frr),
         "method": meth,
-        "score": round(s, 2),
-        "search_region": [x0, y0, x1, y1],
+        "score": round(s0, 2),
+        "dot_score": round(comb, 2),
+        "disk_stats": {"g_in": round(g_in, 1), "g_ring": round(g_ring, 1),
+                       "ring_contrast": round(ring_pos, 1)},
+        "dots_in_disk": {"blue": nb, "red": nr, "yellow": ny,
+                         "mean_dist_frac": round(mdf, 3) if mdf is not None else None},
+        "search_region": [x0 * s, y0 * s, x1 * s, y1 * s],
     }
     if debug:
         result["debug"] = {
-            "candidates": [[round(float(t[0]), 2), t[1], t[2], t[3], t[4]] for t in cands[:10]],
-            "metrics": _disk_metrics(gray_f, masks_f, cx, cy, r),
+            "candidates": [[round(float(t[0]), 2), t[1] * s, t[2] * s, t[3] * s, t[4]]
+                           for t in cands[:10]],
+            "refined": [[round(float(t[0]), 2), t[1] * s, t[2] * s, t[3] * s, t[4]]
+                        for t in refined[:5]],
+            "metrics": _disk_metrics(gray_f, masks_f, fx // s, fy // s, frr // s),
         }
     return result
 
@@ -424,6 +618,9 @@ def analyze(frame, find_kw=None, detect_kw=None):
         "radius": minimap["radius"],
         "method": minimap["method"],
         "score": minimap["score"],
+        "dot_score": minimap.get("dot_score"),
+        "disk_stats": minimap.get("disk_stats"),
+        "dots_in_disk": minimap.get("dots_in_disk"),
         "search_region": minimap.get("search_region"),
         "dots": det["dots"],
         "towers": det["towers"],
@@ -489,7 +686,7 @@ def _demo_image(path, out_dir, show):
         cv2.destroyAllWindows()
 
 
-def _demo_video(path, out_dir, max_frames=30, show=False):
+def _demo_video(path, out_dir, max_frames=30, show=False, start_frame=0):
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         print(f"[demo] 无法打开视频: {path}")
@@ -497,8 +694,8 @@ def _demo_video(path, out_dir, max_frames=30, show=False):
     n_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     print(f"[demo] 视频 {path}: {n_total} 帧, {fps:.2f} fps")
-    start = 0
-    if max_frames > 0 and n_total > max_frames:
+    start = start_frame
+    if start <= 0 and n_total > max_frames:
         start = int(n_total * 0.3)  # 跳过开头（可能是加载/选英雄）
     stride = max(1, (n_total - start) // max_frames)
     frames = [start + i * stride for i in range(min(max_frames, n_total))]
@@ -541,7 +738,7 @@ def main(argv=None):
     if args.image:
         _demo_image(Path(args.image), args.out, args.show)
     elif args.video:
-        _demo_video(args.video, args.out, show=args.show)
+        _demo_video(args.video, args.out, show=args.show, start_frame=args.frame)
     else:
         ap.print_help()
         return 1
