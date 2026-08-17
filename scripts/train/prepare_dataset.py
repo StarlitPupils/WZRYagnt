@@ -26,10 +26,15 @@ def prepare_dataset(hero_name, train_ratio=0.8, extra_dirs=None):
         classes = json.load(f)
     nc = len(classes)
 
-    # 创建目录
+    # 创建目录 + 清空旧划分（多次运行时防 train/val 残留重叠导致泄漏）
     for split in ['train', 'val']:
-        (base_dir / 'images' / split).mkdir(parents=True, exist_ok=True)
-        (base_dir / 'labels' / split).mkdir(parents=True, exist_ok=True)
+        img_split = base_dir / 'images' / split
+        lbl_split = base_dir / 'labels' / split
+        img_split.mkdir(parents=True, exist_ok=True)
+        lbl_split.mkdir(parents=True, exist_ok=True)
+        for f in list(img_split.glob('*')) + list(lbl_split.glob('*')):
+            if f.is_file():
+                f.unlink()
 
     # 收集已标注图片（主目录 + 附加目录）
     img_files = collect_images(img_dir)

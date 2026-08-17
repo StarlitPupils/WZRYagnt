@@ -124,7 +124,8 @@ def main():
             rows.append([img_path.name, cid, AMBIGUOUS.get(cid, cid),
                          sugg if sugg else cid, sugg if sugg else cid,
                          round(green, 3), round(red, 3),
-                         ("改" if sugg and sugg != cid else "保持") if sugg else lean])
+                         ("改" if sugg and sugg != cid else "保持") if sugg else lean,
+                         round(float(p[1]), 4), round(float(p[2]), 4)])
             # 保存裁剪图（供抽查）
             if roi is not None:
                 crop = cv2.resize(roi, (120, 30))
@@ -151,7 +152,7 @@ def main():
     with open(report, "w", newline="", encoding="utf-8-sig") as f:
         cw = csv.writer(f)
         cw.writerow(["file", "old_id", "old_class", "new_id", "new_class",
-                     "green", "red", "verdict"])
+                     "green", "red", "verdict", "xc", "yc"])
         cw.writerows(rows)
     print(f"明细: {report}")
     print("\n建议：先用不带 --apply 跑一遍，抽查 temp/camp_check 下的裁剪图；")
