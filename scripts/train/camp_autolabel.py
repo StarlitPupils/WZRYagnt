@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 IMG_DIR = ROOT / "data" / "screenshots" / "zhongkui"
-AMBIGUOUS = {2: "enemy_minion", 3: "ally_minion", 4: "enemy_turret", 5: "ally_turret"}
+AMBIGUOUS = {0: "enemy_hero", 1: "ally_hero", 2: "enemy_minion", 3: "ally_minion",
+             4: "enemy_turret", 5: "ally_turret"}
 
 
 def bar_colors(roi_bgr):
@@ -64,6 +65,8 @@ def main():
     ap.add_argument("--out-dir", default=str(ROOT / "temp" / "camp_check"))
     ap.add_argument("--img-dir", default=str(IMG_DIR),
                     help="图片目录（默认 data/screenshots/zhongkui；录像抽帧可指 data/screenshots/replay）")
+    ap.add_argument("--include-hero", action="store_true",
+                    help="同时对 enemy_hero(0) 框做血条复核（绿条高置信 -> ally_hero(1)）")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -89,7 +92,8 @@ def main():
                 new_lines.append(ln)
                 continue
             cid = int(p[0])
-            if cid not in (2, 4):
+            check_camp = cid in (2, 4) or (args.include_hero and cid == 0)
+            if not check_camp:
                 new_lines.append(ln)
                 continue
             xc, yc, bw, bh = (float(v) for v in p[1:])
