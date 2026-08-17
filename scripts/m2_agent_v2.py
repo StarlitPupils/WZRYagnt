@@ -179,7 +179,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         target = (ne[0], ne[1])
         reason = "chase_enemy"
     else:
-        # 帮发育路射手：跟随最近 ally_hero，否则朝发育路方向（按阵营镜像）
+        # 帮发育路射手：跟随最近 ally_hero；无队友时朝小地图红点（支援战斗）；
+        # 无红点才朝发育路方向（按阵营镜像）
         na = nearest(allies)
         if na is not None:
             target = (na[0], na[1])
@@ -188,7 +189,15 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             camp = cooldowns.get("camp") or "blue"
             lane = LANE_DIR_BLUE if camp == "blue" else LANE_DIR_RED
             mm = state_dict.get("minimap") or {}
+            red = []
             if mm.get("found"):
+                red = (mm.get("dots") or {}).get("red") or []
+            if red:
+                lx = sum(p[0] for p in red) / len(red)
+                ly = sum(p[1] for p in red) / len(red)
+                target = (lx, ly)
+                reason = "support_red_centroid"
+            elif mm.get("found"):
                 lx, ly = lane
                 target = (lx, ly)
                 reason = "lane_develop"
