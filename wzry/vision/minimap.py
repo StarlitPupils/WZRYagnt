@@ -385,20 +385,36 @@ def find_minimap(frame, search_region=None, prior=None, prior_r=None,
         prior_s = (int(prior[0] / s), int(prior[1] / s))
 
     if fast_prior and prior_s is not None:
-        # ---- 跟踪模式：先验圆心可信，固定圆心 + 半径扫描(步长2) + 圆心微调 ±4 ----
+        # ---- 跟踪模式：先验圆心可信，两段式（半径粗扫 -> 圆心微调 -> 半径精调）----
         px, py = prior_s
         if prior_r is not None:
             r_center = int(prior_r / s)
-            r_band = range(max(r_lo, r_center - 10), min(r_hi, r_center + 11), 2)
+            r_band = range(max(r_lo, r_center - 12), min(r_hi, r_center + 13), 4)
         else:
-            r_band = range(max(r_lo, int(short * 0.07)), min(r_hi, int(short * 0.16) + 1), 2)
+            r_band = range(max(r_lo, int(short * 0.07)), min(r_hi, int(short * 0.16) + 1), 4)
+        best_r = None
         for r in r_band:
+            m = _disk_metrics(gray_f, masks_f, px, py, r)
+            if m is None:
+                continue
+            cands.append((_score_disk(m, short=wh), px, py, r, "prior"))
+            if best_r is None or cands[-1][0] > best_r[0]:
+                best_r = cands[-1]
+        if best_r is not None:
+            # 圆心微调
             for ddy in (-4, 0, 4):
                 for ddx in (-4, 0, 4):
-                    m = _disk_metrics(gray_f, masks_f, px + ddx, py + ddy, r)
+                    m = _disk_metrics(gray_f, masks_f, px + ddx, py + ddy, best_r[3])
                     if m is None:
                         continue
-                    cands.append((_score_disk(m, short=wh), px + ddx, py + ddy, r, "prior"))
+                    cands.append((_score_disk(m, short=wh), px + ddx, py + ddy,
+                                  best_r[3], "prior"))
+            # 半径精调
+            for r in range(max(r_lo, best_r[3] - 3), min(r_hi, best_r[3] + 4), 2):
+                m = _disk_metrics(gray_f, masks_f, px, py, r)
+                if m is None:
+                    continue
+                cands.append((_score_disk(m, short=wh), px, py, r, "prior"))
     else:
         # ---- 方法 A：filter2D 圆核粗扫（numpy 向量化筛选）----
         radii = sorted(set(range(r_lo, r_hi + 1, max(6, (r_hi - r_lo) // 6))))

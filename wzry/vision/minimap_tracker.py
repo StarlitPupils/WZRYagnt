@@ -38,17 +38,42 @@ class MinimapTracker:
         return gray_f, masks_f
 
     def _scan_around(self, gray_f, masks_f, cx, cy, r_center, r_lo, r_hi):
-        """固定圆心扫描半径 + 圆心微调，返回 (score, cx, cy, r) 或 None。"""
+        """固定圆心两段式扫描：半径粗扫(中心不动) -> 最佳半径 -> 圆心微调 -> 半径精调。
+
+        调用次数从 ~90 次度量降到 ~18 次，跟踪单帧 ~30-80ms。
+        返回 (score, cx, cy, r) 或 None。
+        """
+        best_r = None
+        # 1) 半径粗扫：中心不动，步长 4
+        for r in range(max(r_lo, r_center - 12), min(r_hi, r_center + 13), 4):
+            m = minimap._disk_metrics(gray_f, masks_f, cx, cy, r)
+            if m is None:
+                continue
+            s = minimap._score_disk(m)
+            if best_r is None or s > best_r[0]:
+                best_r = (s, r)
+        if best_r is None:
+            return None
+        # 2) 圆心微调：最佳半径下 ±4px
         best = None
-        for r in range(max(r_lo, r_center - 10), min(r_hi, r_center + 11), 2):
-            for ddy in (-4, 0, 4):
-                for ddx in (-4, 0, 4):
-                    m = minimap._disk_metrics(gray_f, masks_f, cx + ddx, cy + ddy, r)
-                    if m is None:
-                        continue
-                    s = minimap._score_disk(m)
-                    if best is None or s > best[0]:
-                        best = (s, cx + ddx, cy + ddy, r)
+        for ddy in (-4, 0, 4):
+            for ddx in (-4, 0, 4):
+                m = minimap._disk_metrics(gray_f, masks_f, cx + ddx, cy + ddy, best_r[1])
+                if m is None:
+                    continue
+                s = minimap._score_disk(m)
+                if best is None or s > best[0]:
+                    best = (s, cx + ddx, cy + ddy, best_r[1])
+        # 3) 半径精调：最佳圆心下 ±3px
+        if best:
+            bx, by = best[1], best[2]
+            for r in range(max(r_lo, best_r[1] - 3), min(r_hi, best_r[1] + 4), 2):
+                m = minimap._disk_metrics(gray_f, masks_f, bx, by, r)
+                if m is None:
+                    continue
+                s = minimap._score_disk(m)
+                if s > best[0]:
+                    best = (s, bx, by, r)
         return best
 
     def _plausible(self, frame, center, radius):
