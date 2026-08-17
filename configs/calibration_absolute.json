@@ -1,0 +1,86 @@
+{
+  "screen_width": 1280,
+  "screen_height": 720,
+  "points": {
+    "move_stick_center": [
+      196,
+      574
+    ],
+    "dir_up": [
+      192,
+      436
+    ],
+    "dir_left_up": [
+      98,
+      475
+    ],
+    "dir_right_up": [
+      310,
+      458
+    ],
+    "dir_left": [
+      87,
+      572
+    ],
+    "dir_right": [
+      353,
+      561
+    ],
+    "dir_left_down": [
+      129,
+      649
+    ],
+    "dir_right_down": [
+      286,
+      654
+    ],
+    "dir_down": [
+      194,
+      679
+    ],
+    "skill1": [
+      963,
+      634
+    ],
+    "skill2": [
+      1039,
+      497
+    ],
+    "skill3": [
+      1172,
+      419
+    ],
+    "attack": [
+      1182,
+      617
+    ],
+    "recall": [
+      656,
+      645
+    ],
+    "restore": [
+      750,
+      645
+    ],
+    "summoner": [
+      852,
+      647
+    ],
+    "active1": [
+      1168,
+      279
+    ],
+    "active2": [
+      1168,
+      189
+    ],
+    "attack_minion": [
+      1067,
+      654
+    ],
+    "attack_tower": [
+      1233,
+      509
+    ]
+  }
+}

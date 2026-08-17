@@ -1,0 +1,18 @@
+# 环境与第三方
+venv/
+.idea/
+__pycache__/
+*.pyc
+
+# 工具与临时文件
+tools/
+temp/
+*.mp4
+*.avi
+*.mkv
+
+# 运行产物与数据（体积大，需选择性提交）
+runs/
+models/
+logs/
+data/

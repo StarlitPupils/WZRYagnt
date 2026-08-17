@@ -1,0 +1,13 @@
+﻿[
+    "enemy_hero",
+    "ally_hero",
+    "enemy_minion",
+    "ally_minion",
+    "enemy_turret",
+    "ally_turret",
+    "enemy_crystal",
+    "ally_crystal",
+    "neutral_monster",
+    "hook_aim",
+    "skill_effect"
+]
