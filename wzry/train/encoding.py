@@ -81,8 +81,9 @@ def states_to_dataset(matches_dir="data/matches", out="data/datasets/bc_v0.npz",
                       max_samples=None, n_units_max=20):
     """扫描 data/matches/*/states.jsonl，编码全部状态为 npz 特征库。
 
-    动作标签来自同会话 actions.jsonl 按时间戳最近匹配（v0 简单对齐：
-    动作事件取该状态之后最近一条；无动作样本标 none）。
+    动作标签采用 **past-action 持续语义**：每个状态的标签 = 该时刻之前（含同时）
+    最近一条动作事件（移动方向/技能按下会持续生效直到下一条事件）；
+    无历史动作的样本标 none。避免"未来动作泄漏"与事件重复标注。
     """
     matches_dir = Path(matches_dir)
     if not matches_dir.exists():
@@ -97,14 +98,15 @@ def states_to_dataset(matches_dir="data/matches", out="data/datasets/bc_v0.npz",
         actions = []
         if af.exists():
             actions = [json.loads(l) for l in af.read_text(encoding="utf-8").splitlines()]
+        actions.sort(key=lambda a: a.get("t", 0.0))
         a_idx = 0
         for line in sf.read_text(encoding="utf-8").splitlines():
             st = json.loads(line)
             enc = encode_state(st, n_units_max=n_units_max)
             t = st.get("t", 0.0)
-            while a_idx < len(actions) and actions[a_idx].get("t", 0.0) < t:
+            while a_idx < len(actions) and actions[a_idx].get("t", 0.0) <= t:
                 a_idx += 1
-            act = actions[a_idx] if a_idx < len(actions) else {"type": "none"}
+            act = actions[a_idx - 1] if a_idx > 0 else {"type": "none"}
             feats.append(enc)
             acts.append(encode_action(act))
             metas.append(enc["meta"])
