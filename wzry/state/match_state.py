@@ -28,12 +28,14 @@ class MatchPhase(str, enum.Enum):
 
 class MatchStateMachine:
     def __init__(self, minimap_center_norm, minimap_r_norm=0.082,
-                 gray_thr=95.0, min_dots=4, hold_frames=3, post_hold_s=5.0):
+                 gray_thr=110.0, min_dots=3, hold_frames=5, post_hold_s=5.0):
         self.minimap_cx, self.minimap_cy = minimap_center_norm
         self.minimap_r_norm = minimap_r_norm
         self.gray_thr = gray_thr
         self.min_dots = min_dots
         self.hold_frames = hold_frames
+        # 离开对局需要连续失败 3 倍进入帧数（滞回，防抖动）
+        self.leave_frames = hold_frames * 3
         self.post_hold_s = post_hold_s   # 结算状态保持秒数，供下游感知"对局结束"
 
         self.phase = MatchPhase.WAITING
@@ -85,7 +87,7 @@ class MatchStateMachine:
             self._in_match_streak = 0
             if self.phase == MatchPhase.IN_MATCH:
                 # 对局画面连续消失 → 判定结算，并"粘住" post_hold_s 秒
-                if self._out_match_streak >= self.hold_frames:
+                if self._out_match_streak >= self.leave_frames:
                     self.phase = MatchPhase.POST_MATCH
                     self._post_since = time.time()
             elif self.phase == MatchPhase.POST_MATCH:
