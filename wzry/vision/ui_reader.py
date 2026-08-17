@@ -17,13 +17,15 @@ def _roi(frame, cx, cy, r):
     return frame[y0:y1, x0:x1]
 
 
-def find_hp_bar(frame, search=(0.08, 0.03, 0.35, 0.12), min_green_frac=0.05):
+def find_hp_bar(frame, search=(0.08, 0.04, 0.35, 0.12), min_bar_len=40):
     """在画面顶部区域自动定位己方血条，返回 (x, y, w, h, hp_ratio) 或 None。
 
-    王者荣耀血条：顶部靠左的绿色分段条。策略：
-      1. 在搜索区域取绿色掩码（HSV H 40-85）；
-      2. 按行投影找绿色最密集的水平带；
-      3. 在该带内按列投影求绿色区间长度 -> hp_ratio = 绿色长度/条总长。
+    王者荣耀血条：左上角英雄头像右侧的水平绿色长条。
+    策略（水平条结构检测，抗场景绿色干扰）：
+      1. 搜索区绿色掩码；
+      2. 水平核（31x3）开运算滤掉块状场景绿，只留长横条；
+      3. 逐行找最长连续绿色段，作为血条；
+      4. hp_ratio = 绿色段长度 / 血条总长（分段条近似，满血=1）。
     """
     h, w = frame.shape[:2]
     x0, y0 = int(search[0] * w), int(search[1] * h)
@@ -33,22 +35,40 @@ def find_hp_bar(frame, search=(0.08, 0.03, 0.35, 0.12), min_green_frac=0.05):
         return None
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     green = cv2.inRange(hsv, (40, 80, 90), (85, 255, 255))
-    frac = float((green > 0).mean())
-    if frac < min_green_frac:
+    # 水平条结构：31x3 核开运算（保留 >31px 的横条）
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 3))
+    bars = cv2.morphologyEx(green, cv2.MORPH_OPEN, kernel)
+    # 逐行最长连续段
+    best = None
+    for ry in range(bars.shape[0]):
+        row = bars[ry]
+        runs = np.diff(np.nonzero(np.concatenate(([0], row, [0])))[0]).reshape(-1, 2)
+        # 连续段：(起点, 长度)
+        segs = []
+        in_run = False
+        for x in range(row.shape[0]):
+            if row[x] and not in_run:
+                start = x
+                in_run = True
+            elif not row[x] and in_run:
+                segs.append((start, x - start))
+                in_run = False
+        if in_run:
+            segs.append((start, row.shape[0] - start))
+        for (sx, slen) in segs:
+            if slen >= min_bar_len and (best is None or slen > best[0]):
+                best = (slen, ry, sx)
+    if best is None:
         return None
-    # 行投影：绿色像素最多的行带
-    row_sum = green.sum(axis=1)
-    best_row = int(np.argmax(row_sum))
-    band = green[max(0, best_row - 4):best_row + 5, :]
-    col_present = (band > 0).any(axis=0)
-    cols = np.nonzero(col_present)[0]
-    if len(cols) == 0:
-        return None
-    bar_x0, bar_x1 = cols.min(), cols.max()
-    bar_w = max(1, bar_x1 - bar_x0 + 1)
-    # 血条总长按绿色覆盖的完整区间估算；hp 比例 = 绿色列占比（分段条近似）
-    hp_ratio = float(col_present.sum()) / bar_w
-    return (x0 + bar_x0, y0 + best_row, bar_w, 9, hp_ratio)
+    slen, ry, sx = best
+    # 血条总长：绿色段 + 右侧空血槽延伸（灰度 >60 的连续区）
+    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    bar_end = sx + slen
+    while bar_end < roi_gray.shape[1] and roi_gray[ry, bar_end] > 60:
+        bar_end += 1
+    bar_total = max(slen, bar_end - sx)
+    hp_ratio = float(slen) / bar_total
+    return (x0 + sx, y0 + ry, bar_total, 3, round(float(hp_ratio), 3))
 
 
 def skill_cooldown_fraction(frame, skill_points, roi_r=26):
