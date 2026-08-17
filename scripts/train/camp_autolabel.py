@@ -62,13 +62,16 @@ def main():
     ap.add_argument("--camp", default="blue", choices=["blue", "red"])
     ap.add_argument("--min-conf", type=float, default=0.30)
     ap.add_argument("--out-dir", default=str(ROOT / "temp" / "camp_check"))
+    ap.add_argument("--img-dir", default=str(IMG_DIR),
+                    help="图片目录（默认 data/screenshots/zhongkui；录像抽帧可指 data/screenshots/replay）")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    img_dir = Path(args.img_dir)
     rows = []
     n_total = n_sugg = n_apply = n_uncertain = 0
-    img_files = sorted(IMG_DIR.glob("*.jpg")) + sorted(IMG_DIR.glob("*.png"))
+    img_files = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png"))
     for img_path in img_files:
         txt = img_path.with_suffix(".txt")
         if not txt.exists():
