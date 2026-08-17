@@ -24,6 +24,7 @@ from wzry.capture.scrcpy_stream import ScrcpyStreamCapture  # noqa: E402
 from wzry.state.fuser import build_state  # noqa: E402
 from wzry.state.match_state import MatchPhase, MatchStateMachine  # noqa: E402
 from wzry.vision.detector import YoloDetector  # noqa: E402
+from wzry.vision.minimap_tracker import MinimapTracker  # noqa: E402
 
 
 def main():
@@ -46,6 +47,19 @@ def main():
     print(f"加载检测模型 {args.model} ...")
     det = YoloDetector(args.model, conf=0.35)
 
+    # 小地图跟踪：先验 = 校准点（归一化 -> 首个实际帧尺寸换算）
+    mm_prior = None
+
+    def make_tracker(frame):
+        nonlocal mm_prior
+        if mm_prior is None:
+            h, w = frame.shape[:2]
+            mc = calib.get("minimap_center", [0.086, 0.129])
+            mm_prior = [int(mc[0] * w), int(mc[1] * h)]
+        return MinimapTracker(prior_center=mm_prior)
+
+    tracker = None
+
     save_dir = ROOT / "data" / "live_states"
     last_save = 0.0
     frame_id = 0
@@ -65,15 +79,28 @@ def main():
             phase = sm.update(frame)
 
             now = time.time()
-            if now - last_detect >= detect_interval:
+            if phase == MatchPhase.IN_MATCH and now - last_detect >= detect_interval:
                 last_detect = now
                 dets = det.detect(frame)
                 infer = det.last_infer_ms
-                st = build_state(frame, dets, phase.value, frame_id=frame_id)
+                if tracker is None:
+                    tracker = make_tracker(frame)
+                mm = tracker.update(frame)
+                st = build_state(frame, dets, phase.value, minimap={
+                    "found": mm["found"],
+                    "center": mm["center"],
+                    "radius": mm["radius"],
+                    "dots": mm["dots"],
+                    "towers": mm["towers"],
+                }, frame_id=frame_id)
                 frame_id += 1
                 objs = ", ".join(f"{d.cls}:{d.conf:.2f}" for d in dets[:6]) or "无"
+                mm_txt = (f"小地图 {'OK' if mm['found'] else '--'} "
+                          f"蓝{len(mm['dots']['blue'])}/红{len(mm['dots']['red'])} "
+                          f"({tracker.last_ms:.0f}ms)") if mm["found"] else \
+                         f"小地图 未找到 ({tracker.last_ms:.0f}ms)"
                 print(f"[{datetime.now():%H:%M:%S}] {phase.value:<9} 采集延迟 {lag_ms:5.0f}ms "
-                      f"检测 {infer:5.0f}ms | {objs}")
+                      f"检测 {infer:5.0f}ms | {objs} | {mm_txt}")
                 if phase == MatchPhase.IN_MATCH and not args.no_save and now - last_save >= args.save_every:
                     last_save = now
                     save_dir.mkdir(parents=True, exist_ok=True)
