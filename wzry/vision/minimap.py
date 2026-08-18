@@ -57,13 +57,21 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 # HSV 颜色阈值（OpenCV H: 0-180）
+# v2.8 语义（用户实测指导）：
+#   green = 自己（绿色圈/箭头）
+#   blue  = 队友英雄（蓝色圈）+ 我方小兵（移动小蓝点）
+#   red   = 敌方英雄（红色圈）+ 敌方小兵（移动小红点）
+#   yellow= 野怪（黄色点）
+#   塔：蓝/红方块（我方/敌方防御塔，在 towers 中带 color）
 COLOR_THRESH = {
-    # 蓝方（我方）圆点
+    # 队友/我方单位（蓝圈/蓝点）
     "blue": {"h_lo": 95, "h_hi": 135, "s_min": 60, "v_min": 50},
-    # 红方（敌方）圆点：H 红 = 0 附近与 170-180 两段
+    # 敌方单位（红圈/红点）：H 红 = 0 附近与 170-180 两段
     "red": {"h_lo": 0, "h_hi": 10, "h2_lo": 170, "h2_hi": 180, "s_min": 70, "v_min": 50},
-    # 中立单位（野怪/龙等）圆点
+    # 野怪（黄色点）
     "yellow": {"h_lo": 15, "h_hi": 38, "s_min": 80, "v_min": 60},
+    # 自己（绿色圈/箭头）：真机标定 HSV=(55,182,196)（鲜艳绿，H 35-90）
+    "green": {"h_lo": 35, "h_hi": 90, "s_min": 100, "v_min": 100},
 }
 
 # 定位搜索范围：默认左上 40% 区域（任务要求；可通过 search_region 覆盖）
@@ -552,7 +560,8 @@ def detect_dots(frame, minimap, debug=False):
     -------
     dict  见模块 docstring 中的输出结构；未找到小地图时 dots 为空。
     """
-    empty = {"dots": {"blue": [], "red": [], "yellow": []},
+    empty = {"dots": {"blue": [], "red": [], "yellow": [], "green": []},
+             "minions": {"blue": [], "red": [], "green": []},
              "towers": [], "detail": {}}
     if not minimap.get("found"):
         return empty
@@ -563,54 +572,64 @@ def detect_dots(frame, minimap, debug=False):
         return empty
 
     masks = _color_masks(frame)
+    # v2.8：小地图为方形（用户实测：最大范围 2r x 2r），用方形 mask 而非圆形
     disk = np.zeros((h, w), np.uint8)
-    cv2.circle(disk, (cx, cy), r, 255, -1)
-    # 稍微膨胀圆盘 mask，避免贴边圆点被裁掉一部分面积而掉档
-    disk = cv2.dilate(disk, np.ones((3, 3), np.uint8))
+    x0m, y0m = max(0, cx - r), max(0, cy - r)
+    x1m, y1m = min(w, cx + r), min(h, cy + r)
+    disk[y0m:y1m, x0m:x1m] = 255
 
-    # 尺寸阈值（相对圆盘半径 r）
+    # 尺寸阈值（相对圆盘半径 r）v2.8 真机标定：
+    #   英雄圈（头像）：面积 ~90-300（30x30）
+    #   小兵/野怪点：~20-40（7x7）
+    #   塔（方块）：~40-90（矩形）
+    #   河道/大块：>500（误检过滤）
     area_noise_max = np.pi * (FRAC_NOISE_MAX * r) ** 2
     area_hero_lo = np.pi * (FRAC_HERO_LO * r) ** 2
     area_hero_hi = np.pi * (FRAC_HERO_HI * r) ** 2
 
     def _classify(area, comp=None, bright=False):
-        """返回 "noise" | "tower" | "hero"。
+        """返回 "noise" | "tower" | "hero" | "minion"。
 
-        v2.7：增加紧凑度与亮度验证，排除河道边缘等狭长连通域：
-          - comp（紧凑度 = 面积/外接矩形面积）：英雄点近圆，comp > 0.55；
-          - bright（连通域内高亮像素占比）：英雄点有亮边框/亮中心。
+        v2.8 真机标定（方形小地图 232x232，r=116 时）：
+          hero  : 60 <= area <= 450（英雄圈：自己绿圈 32x33=372、队友蓝圈 12x17≈140）
+          minion: 10 <= area < 60（小兵/野怪小点 7x7≈30）
+          tower : 矩形且面积 40-90（塔方块，长宽比>1.5）
+          noise : area < 10 或 > 500（河道/大块）
         """
-        if area < max(2.0, area_noise_max):
+        if area < 10 or area > 700:
             return "noise"
-        if area > area_hero_hi:
+        if comp is not None and comp < 0.4:
             return "noise"
-        # 紧凑度：排除狭长河道边缘
-        if comp is not None and comp < 0.5:
-            return "noise"
-        if area <= area_hero_hi and area >= area_hero_lo:
-            if comp is not None and comp < 0.6:
-                return "tower" if area < area_hero_lo else "noise"
+        if area >= 60:
             return "hero"
-        if area < area_hero_lo:
-            return "tower"
-        return "noise"  # 过大，视为误检
+        if comp is not None and comp < 0.7:
+            return "tower"     # 矩形（长宽比大）= 塔
+        return "minion"
 
     def _norm(x, y):
         nx = (x - (cx - r)) / (2.0 * r)
         ny = (y - (cy - r)) / (2.0 * r)
-        valid = (nx - 0.5) ** 2 + (ny - 0.5) ** 2 <= 0.25 + 1e-6
+        # v2.8：方形小地图，所有框内点均有效
+        valid = 0.0 <= nx <= 1.0 and 0.0 <= ny <= 1.0
         return round(float(nx), 4), round(float(ny), 4), bool(valid)
 
-    dots = {"blue": [], "red": [], "yellow": []}
+    dots = {"blue": [], "red": [], "yellow": [], "green": []}
+    # v2.8：minions 单独输出（小绿点=我方小兵、小红点=敌方小兵、小蓝点=我方小兵）
+    minions = {"blue": [], "red": [], "green": []}
     towers = []
-    detail = {"blue": [], "red": [], "yellow": [], "towers": []}
+    detail = {"blue": [], "red": [], "yellow": [], "green": [], "towers": [],
+              "minions": {"blue": [], "red": [], "green": []}}
 
     # 全图灰度（供亮度验证）
     gray_full = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    for color in ("blue", "red", "yellow"):
+    for color in ("blue", "red", "yellow", "green"):
         m = masks[color] & disk
-        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((MORPH_K, MORPH_K), np.uint8))
+        # v2.8：先开运算去噪；蓝/红/绿再闭运算合并（英雄圈+箭头连成一体），
+        # 黄色（野怪小点）保持独立不做闭运算
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        if color != "yellow":
+            m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         n, lab, st, cent = cv2.connectedComponentsWithStats(m, 8)
         for i in range(1, n):
             area = int(st[i, cv2.CC_STAT_AREA])
@@ -634,12 +653,17 @@ def detect_dots(frame, minimap, debug=False):
             if cls == "hero":
                 dots[color].append([nx, ny])
                 detail[color].append(rec)
+            elif cls == "minion":
+                if color != "yellow":   # 黄点=野怪，不进 minions（yellow 无 minion 语义）
+                    minions[color].append([nx, ny])
+                    detail["minions"][color].append(rec)
             else:  # tower
                 towers.append([nx, ny])
                 rec["color"] = color
                 detail["towers"].append(rec)
 
-    return {"dots": dots, "towers": towers, "detail": detail}
+    return {"dots": dots, "minions": minions, "towers": towers,
+            "detail": detail}
 
 
 def analyze(frame, find_kw=None, detect_kw=None):

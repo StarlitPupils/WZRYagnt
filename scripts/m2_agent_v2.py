@@ -49,7 +49,7 @@ NEAR_FRAC = 0.25              # 一技能"身边"阈值（敌人或敌兵 < 0.25
 HOOK_CONFIRM_S = 1.0          # 勾中确认窗：二技能释放后 1s 内判定
 HOOK_DIST_SHRINK = 0.72       # 勾中判据：敌人距离缩小到释放时的 72% 以下
 MOVE_R = 0.8
-MOVE_DURATION_MS = 2000       # 持续拖动（用户要求：轮盘移动不是点按而是一直拖动）
+MOVE_DURATION_MS = 3000       # 持续拖动（v2.8：加长到 3s，覆盖决策间隔，防走走停停）
 # 发育路方向（小地图归一化坐标）：由开局阵营决定（蓝方右下 / 红方左上镜像）
 LANE_DIR_BLUE = (0.72, 0.82)
 LANE_DIR_RED = (0.28, 0.18)
@@ -150,6 +150,14 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     for u in units:
         cls = str(u.get("cls", ""))
         scr = u.get("screen") or [0.5, 0.5, 0.0, 0.0]
+        cx, cy = scr[0], scr[1]
+        # v2.8 UI 区过滤：右上角头像区 (x>0.72, y<0.26) 的塔/英雄检测是 UI 误检
+        if cls in ("enemy_turret", "ally_turret", "enemy_hero", "ally_hero") \
+                and cx > 0.72 and cy < 0.26:
+            continue
+        # 小地图区 (x<0.18, y<0.32) 的检测也可能含小地图图标
+        if cls in ("enemy_turret", "ally_turret") and cx < 0.18 and cy < 0.32:
+            continue
         if cls == "enemy_hero":
             enemies.append(scr)
         elif cls == "enemy_minion":
@@ -400,10 +408,16 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         try:
             tgrid = load_terrain()
             n = tgrid.shape[0]
-            # 己方位置（小地图蓝点最近圆心的），目标 = 移动目标（小地图坐标）
-            blues = (mm.get("dots") or {}).get("blue") or []
-            if blues and 0.0 <= target[0] <= 1.0 and 0.0 <= target[1] <= 1.0:
-                self_p = min(blues, key=lambda p: (p[0] - 0.5) ** 2 + (p[1] - 0.5) ** 2)
+            # 己方位置（v2.8：绿色点=自己；退化蓝点）
+            self_p = None
+            greens = (mm.get("dots") or {}).get("green") or []
+            if greens:
+                self_p = min(greens, key=lambda p: (p[0] - 0.5) ** 2 + (p[1] - 0.5) ** 2)
+            else:
+                blues = (mm.get("dots") or {}).get("blue") or []
+                if blues:
+                    self_p = min(blues, key=lambda p: (p[0] - 0.5) ** 2 + (p[1] - 0.5) ** 2)
+            if self_p and 0.0 <= target[0] <= 1.0 and 0.0 <= target[1] <= 1.0:
                 sg = (min(n - 1, max(0, int(self_p[1] * n))),
                       min(n - 1, max(0, int(self_p[0] * n))))
                 tg = (min(n - 1, max(0, int(target[1] * n))),
@@ -552,7 +566,8 @@ def main():
     from wzry.vision.detector import YoloDetector
     from wzry.vision.minimap_tracker import MinimapTracker
 
-    cap = ScrcpyStreamCapture(ROOT / "tools" / "scrcpy")
+    # v2.8：rotate_s 调大到 30 分钟（避免对局中轮转导致"无帧"停顿）
+    cap = ScrcpyStreamCapture(ROOT / "tools" / "scrcpy", rotate_s=1800)
     print("启动 scrcpy 流（首次需推送服务端，约 2-5 秒）...")
     cap.start()
 
@@ -705,18 +720,23 @@ def main():
                 print(f"[{datetime.now():%H:%M:%S}] [决策] {format_decision(action)}")
                 last_sig = sig
 
-            # ---- 撞墙感知（v2.6）：移动中蓝点不动 -> 绕行 ----
+            # ---- 撞墙感知（v2.6）：移动中自己位置不动 -> 绕行 ----
             if action.get("type") == "move":
-                # 己方蓝点：小地图蓝点中离圆心最近的（通常是自己）
+                # v2.8：己方位置 = 小地图绿色点（用户语义：绿圈=自己）
                 hero_pos = None
                 if mm.get("found"):
-                    blues = (mm.get("dots") or {}).get("blue") or []
-                    if blues:
-                        hero_pos = min(blues, key=lambda p: (p[0]-0.5)**2 + (p[1]-0.5)**2)
+                    greens = (mm.get("dots") or {}).get("green") or []
+                    if greens:
+                        hero_pos = min(greens, key=lambda p: (p[0]-0.5)**2 + (p[1]-0.5)**2)
+                    else:
+                        # 绿色点未检出时退化为蓝色点（队友近似，宽容）
+                        blues = (mm.get("dots") or {}).get("blue") or []
+                        if blues:
+                            hero_pos = min(blues, key=lambda p: (p[0]-0.5)**2 + (p[1]-0.5)**2)
                 wall_hit = wall_sensor.update(now, True, hero_pos)
                 if wall_hit:
                     action = wall_sensor.avoid_action(float(action.get("theta", 0.0)))
-                    print(f"[{datetime.now():%H:%M:%S}] [撞墙] 蓝点未动 -> 绕行")
+                    print(f"[{datetime.now():%H:%M:%S}] [撞墙] 位置未动 -> 绕行")
                     sig = ("move", None)
             else:
                 wall_sensor.update(now, False, None)
