@@ -57,16 +57,32 @@ class Understanding:
 
     # ---------- 自己状态 ----------
     def _self_status(self, frame):
-        """自己：HP/MP/技能状态。"""
-        from wzry.vision.ui_reader import find_hp_bar, find_mp_bar, skill_ready_state
-        hp_bar = find_hp_bar(frame)
-        mp_bar = find_mp_bar(frame, hp_bar=hp_bar)
-        # 技能按钮（校准坐标）
+        """自己：HP/MP/技能状态。
+
+        HP/MP 用英雄头顶血条蓝条检测（self_bars，镜头跟随自己）。
+        """
+        from wzry.vision.ui_reader import skill_ready_state
         skills_pts = _load_skill_points()
         skill_states = skill_ready_state(frame, skills_pts)
+        hp = mp = None
+        try:
+            from wzry.vision.self_bars import detect_self_bars
+            hp, mp, hero_pos = detect_self_bars(frame)
+        except Exception:
+            hero_pos = None
+        # 回退：HUD 血条检测
+        if hp is None:
+            try:
+                from wzry.vision.ui_reader import find_hp_bar
+                hb = find_hp_bar(frame)
+                if hb:
+                    hp = hb[-1]
+            except Exception:
+                pass
         return {
-            "hp": hp_bar[-1] if hp_bar else None,
-            "mp": mp_bar[-1] if mp_bar else None,
+            "hp": hp,
+            "mp": mp,
+            "hero_pos": hero_pos,
             "skills": skill_states,
         }
 
