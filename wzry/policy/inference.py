@@ -4,7 +4,8 @@
 解码规则：
   - move_theta: 8 向 log_softmax -> argmax -> bin 中心弧度（0=右，逆时针）
   - move_r:     sigmoid -> 摇杆幅度
-  - act:        8 类 ['none','skill1','skill2','skill3','attack','buy','recall','summoner']
+  - act:        10 类 ['move','skill1','skill2','skill3','attack','buy','recall',
+                'summoner','restore','none']（与 encoding.encode_action 对齐）
                 -> argmax；none 时不产生动作
   - target:     sigmoid 目标点（保留，当前执行器用智能施法 tap）
 """
@@ -17,7 +18,8 @@ import torch
 from wzry.policy.model import BCNet
 from wzry.train.encoding import encode_state
 
-ACT_NAMES = ["none", "skill1", "skill2", "skill3", "attack", "buy", "recall", "summoner"]
+ACT_NAMES = ["move", "skill1", "skill2", "skill3", "attack",
+             "buy", "recall", "summoner", "restore", "none"]
 SKILL_MAP = {"skill1": 1, "skill2": 2, "skill3": 3}
 BIN_ANGLE = 2 * math.pi / 8
 
@@ -59,6 +61,15 @@ class BCNetInference:
         elif act_name == "attack":
             action["attack"] = True
             action["reason"] = "bc:attack"
+        elif act_name == "recall":
+            action["recall"] = True
+            action["reason"] = "bc:recall"
+        elif act_name == "restore":
+            action["restore"] = True
+            action["reason"] = "bc:restore"
+        elif act_name == "summoner":
+            action["summoner"] = True
+            action["reason"] = "bc:summoner"
         else:
             action["reason"] = f"bc:{act_name}"
         action["move_bin"] = move_bin

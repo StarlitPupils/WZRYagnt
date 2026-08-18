@@ -31,7 +31,7 @@ MOVE_DURATION_MS = 400
 
 
 def apply_guards(action: dict, now: float, cooldowns: dict) -> dict:
-    """冷却节流 + 技能后防抖（模型动作的外部安全层）。"""
+    """冷却节流 + 技能后防抖 + 回城/恢复节流（模型动作的外部安全层）。"""
     if action.get("type") == "skill":
         key = f"skill{action.get('id')}"
         thr = SKILL2_THROTTLE_S if action.get("id") == 2 else SKILL1_THROTTLE_S
@@ -39,6 +39,21 @@ def apply_guards(action: dict, now: float, cooldowns: dict) -> dict:
             return {"type": "none", "reason": f"{key}_throttle"}
         cooldowns[key] = now
         cooldowns["skill"] = now
+        return action
+    if action.get("type") == "recall":
+        if now - float(cooldowns.get("recall_t", 0.0)) <= 20.0:
+            return {"type": "none", "reason": "recall_throttle"}
+        cooldowns["recall_t"] = now
+        return action
+    if action.get("type") == "restore":
+        if now - float(cooldowns.get("restore_t", 0.0)) <= 10.0:
+            return {"type": "none", "reason": "restore_throttle"}
+        cooldowns["restore_t"] = now
+        return action
+    if action.get("type") == "summoner":
+        if now - float(cooldowns.get("summoner_t", 0.0)) <= 30.0:
+            return {"type": "none", "reason": "summoner_throttle"}
+        cooldowns["summoner_t"] = now
         return action
     if action.get("type") == "move":
         if now - float(cooldowns.get("skill", 0.0)) < SKILL_DEBOUNCE_S:
@@ -95,7 +110,8 @@ def main():
     confirm = 0
     confirmed = False
     recorder = MatchRecorder(base_dir=ROOT / "data" / "matches")
-    cooldowns = {"skill1": 0.0, "skill2": 0.0, "skill": 0.0}
+    cooldowns = {"skill1": 0.0, "skill2": 0.0, "skill": 0.0,
+                 "recall_t": 0.0, "restore_t": 0.0, "summoner_t": 0.0}
     frame_id = 0
     n_action = 0
     detect_interval = 1.0 / max(0.5, args.detect_hz)
@@ -174,6 +190,12 @@ def main():
                     ex.move(action["theta"], action.get("r", 0.8), action.get("duration_ms", 400))
                 elif action["type"] == "attack":
                     ex.attack("free")
+                elif action["type"] == "recall":
+                    ex.recall()
+                elif action["type"] == "restore":
+                    ex.restore()
+                elif action["type"] == "summoner":
+                    ex.summoner()
                 n_action += 1
                 act_log = {"t": time.time(), **action}
                 if args.save:

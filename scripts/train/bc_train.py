@@ -56,13 +56,14 @@ def main():
     print(f"数据集: {n} 样本  units={tuple(units.shape)} grid={tuple(grid.shape)}")
 
     # 动作编码布局（与 encoding.encode_action 一致）
-    # [0:6) one-hot: move/skill/attack/buy/recall/none, [6]=theta_norm, [7]=r, [8:10]=target
-    act_onehot = actions[:, :6]
+    # [0:10) one-hot: move/skill1/2/3/attack/buy/recall/summoner/restore/none,
+    # [10]=theta_norm, [11]=r, [12:14]=target
+    act_onehot = actions[:, :10]
     # 移动方向：连续弧度 -> 8 向 bin（0-7）
-    theta_rad = (actions[:, 6] * (2 * np.pi + 1e-6)) % (2 * np.pi)
+    theta_rad = (actions[:, 10] * (2 * np.pi + 1e-6)) % (2 * np.pi)
     act_theta = ((theta_rad / (2 * np.pi)) * 8).long() % 8
-    act_r = actions[:, 7]
-    act_target = actions[:, 8:10]
+    act_r = actions[:, 11]
+    act_target = actions[:, 12:14]
 
     net = BCNet()
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)

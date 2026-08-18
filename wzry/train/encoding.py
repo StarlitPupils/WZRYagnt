@@ -62,14 +62,21 @@ def encode_state(st: dict, n_units_max: int = 20) -> dict:
                      "phase": st.get("phase")}}
 
 
-def encode_action(act: dict, n_actions: int = 6) -> np.ndarray:
-    """动作 dict -> 向量。act: {"type": "move|skill|attack|buy|recall|none", ...}
-    输出长度 n_actions + 4（theta, r, target_x, target_y 归一化）。"""
-    types = ["move", "skill", "attack", "buy", "recall", "none"]
+def encode_action(act: dict, n_actions: int = 10) -> np.ndarray:
+    """动作 dict -> 向量。act: {"type": "move|skill|attack|buy|recall|summoner|restore|none", ...}
+    输出长度 n_actions + 4（theta, r, target_x, target_y 归一化）。
+    类型 one-hot 与 BCNet.act 输出对齐（0-9）：
+      move/skill1/skill2/skill3/attack/buy/recall/summoner/restore/none
+    """
+    types = ["move", "skill1", "skill2", "skill3", "attack",
+             "buy", "recall", "summoner", "restore", "none"]
     vec = np.zeros((max(n_actions, len(types)) + 4,), dtype=np.float32)
     t = act.get("type", "none")
-    if t in types:
-        vec[types.index(t)] = 1.0
+    if t == "skill":
+        t = f"skill{int(act.get('id', 2))}"
+    if t not in types:
+        t = "none"
+    vec[types.index(t)] = 1.0
     vec[n_actions] = float(act.get("theta", 0.0) or 0.0) / (2 * np.pi + 1e-6)
     vec[n_actions + 1] = float(act.get("r", 0.0) or 0.0)
     vec[n_actions + 2] = float(act.get("target_x", 0.0) or 0.0)

@@ -23,7 +23,7 @@ UNIT_DIM = 16
 GRID = 40
 UI_DIM = 6
 N_MOVE_DIR = 8
-N_ACT = 8
+N_ACT = 10   # move/skill1/skill2/skill3/attack/buy/recall/summoner/restore/none（与 encode_action 对齐）
 
 
 class UnitEncoder(nn.Module):
