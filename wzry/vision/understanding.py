@@ -70,10 +70,17 @@ class Understanding:
             "skills": skill_states,
         }
 
-    # ---------- 队友/敌人（待完善：顶部头像条 + 右上角） ----------
+    # ---------- 队友/敌人（顶部头像条 + 右上角） ----------
     def _others(self, frame):
-        """队友/敌人状态（占位：当前返回空，后续用头像条 ROI 检测）。"""
-        return {"teammates": [], "enemies": []}
+        """队友头像条 + 右上角敌方信息（teammate_bar）。"""
+        try:
+            from wzry.vision.teammate_bar import detect_teammates, detect_enemies
+            return {
+                "teammates": detect_teammates(frame),
+                "enemies": detect_enemies(frame),
+            }
+        except Exception:
+            return {"teammates": [], "enemies": []}
 
     # ---------- 英雄识别（小地图英雄圈 -> 英雄名） ----------
     def _recognize_minimap_heroes(self, frame):
