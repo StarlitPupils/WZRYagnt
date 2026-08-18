@@ -651,6 +651,9 @@ def detect_dots(frame, minimap, debug=False):
                    "area": area, "comp": round(comp, 2), "gmean": round(gmean, 0),
                    "valid": valid}
             if cls == "hero":
+                # v2.9：小地图顶部边缘（归一化 y<0.10）的红色是基地/UI，非敌人
+                if color == "red" and ny < 0.10:
+                    continue
                 dots[color].append([nx, ny])
                 detail[color].append(rec)
             elif cls == "minion":
