@@ -567,6 +567,51 @@ class TestOpeningProtect(unittest.TestCase):
         act = decide(st, cd)
         self.assertEqual(act["reason"], "lane_develop")
 
+
+class TestDecisionV2(unittest.TestCase):
+    """v2.12 决策层升级：敌人红条追击 + MP 管理。"""
+
+    def _extra_state(self, enemy_bars=None, mp=1.0, hero_pos=None):
+        st = state(units=[], minimap=mm_found())
+        extra = {}
+        if enemy_bars:
+            extra["enemy_bars"] = enemy_bars
+        if hero_pos:
+            extra["hero_pos"] = hero_pos
+        st["extra"] = extra
+        st.setdefault("ui", {})["mp"] = mp
+        return st
+
+    def test_chase_enemy_bar_when_no_detection(self):
+        """YOLO 未检出敌人但红条可见 -> 朝红条方向移动。"""
+        cd = fresh_cd()
+        # 红条在屏幕右侧 (1000, 300) -> 归一化 (0.78, 0.42)
+        st = self._extra_state(enemy_bars=[(1000, 300, 60)])
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "chase_enemy_bar")
+        # 朝右（theta 接近 0）
+        self.assertLess(abs(act["theta"]), 0.5)
+
+    def test_skill_disabled_when_low_mp(self):
+        """MP < 20% 时禁用技能（省蓝），只普攻/移动。"""
+        cd = fresh_cd()
+        # 敌人在钩子范围 (0.75, 0.5) 但 MP 极低
+        st = state(units=[enemy(0.75, 0.50)])
+        st["extra"] = {}
+        st.setdefault("ui", {})["mp"] = 0.10
+        act = decide(st, cd)
+        self.assertNotEqual((act["type"], act.get("id")), ("skill", 2))
+
+    def test_skill_enabled_when_mp_ok(self):
+        """MP 充足时钩子正常。"""
+        cd = fresh_cd()
+        st = state(units=[enemy(0.75, 0.50)])
+        st["extra"] = {}
+        st.setdefault("ui", {})["mp"] = 0.9
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act.get("id")), ("skill", 2))
+
     def test_after_opening_supports(self):
         cd = fresh_cd()
         cd["camp"] = "blue"

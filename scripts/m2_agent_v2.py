@@ -144,6 +144,12 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     w, h = state_dict.get("screen_size") or (1280.0, 720.0)
     aspect = (float(h) / float(w)) if w else 0.5625
 
+    # ---- v2.12 理解层输入：extra（敌人红条/阵容/自己位置）----
+    extra = state_dict.get("extra") or {}
+    enemy_bars = extra.get("enemy_bars") or []   # [(x, y, w)] 屏幕像素敌人红条
+    roster = extra.get("roster") or cooldowns.get("roster")
+    hero_pos_px = extra.get("hero_pos")          # 自己英雄屏幕像素位置
+
     units = state_dict.get("units") or []
     enemies, minions, turrets, allies, ally_minions, monsters = [], [], [], [], [], []
     ally_turrets = []
@@ -266,7 +272,11 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
 
     # ---- 2) 二技能：敌方英雄在钩子范围内（v2.5 增加：钩子路径被小兵/野怪挡住则不钩）----
     skill_states = (state_dict.get("ui") or {}).get("skill_states") or {}
-    if enemies:
+    # v2.12 MP 管理：MP < 20% 时禁用技能（省蓝），只用普攻
+    mp = float((state_dict.get("ui") or {}).get("mp") or 1.0)
+    MP_SAVE_THRESHOLD = 0.20
+    mp_saving = mp < MP_SAVE_THRESHOLD
+    if enemies and not mp_saving:
         ne = nearest(enemies)
         d = dist_width(ne[0], ne[1])
         if d <= SKILL2_RANGE_FRAC and ready("skill2_t", SKILL2_THROTTLE_S):
@@ -293,7 +303,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     # ---- 3) 一技能：不在大招生效期 且 敌人/敌兵在身边（v2.5：未解锁则跳过，落普攻）----
     in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= SKILL3_ACTIVE_S
     s1 = skill_states.get("1") or {}
-    if not in_ult and s1.get("unlocked") is not False \
+    if not in_ult and not mp_saving and s1.get("unlocked") is not False \
             and ready("skill1_t", SKILL1_THROTTLE_S):
         ne = nearest(enemies)
         ne_m = nearest(minions)
@@ -331,47 +341,66 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 "duration_ms": MOVE_DURATION_MS, "reason": reason}
     target = None
     reason = None
+    # ---- v2.12 敌人红条追击：YOLO 未检出敌人但红条可见 -> 朝红条方向移动 ----
+    if not enemies and enemy_bars:
+        # 红条（屏幕像素）-> 归一化坐标
+        nearest_bar = min(enemy_bars, key=lambda b: math.hypot(
+            b[0] / w - 0.5, (b[1] / h - 0.5) * (h / w)))
+        bx, by = nearest_bar[0] / w, nearest_bar[1] / h
+        if 0.0 <= bx <= 1.0 and 0.0 <= by <= 1.0:
+            target = (bx, by)
+            reason = "chase_enemy_bar"
     if enemies:
         ne = nearest(enemies)
         target = (ne[0], ne[1])
         reason = "chase_enemy"
     else:
-        # 移动决策（用户规则：通过小地图观察敌我位置）：
-        #   1) 跟随队友：屏幕 ally_hero 优先；否则小地图蓝点中离发育路最近的（射手优先）
-        #   2) 无队友：朝小地图红点（支援战斗）
-        #   3) 无红点：朝发育路方向（按阵营镜像）
-        camp = cooldowns.get("camp") or "blue"
-        lane = LANE_DIR_BLUE if camp == "blue" else LANE_DIR_RED
-        mm = state_dict.get("minimap") or {}
-        mm_blue, mm_red = [], []
-        if mm.get("found"):
-            mm_blue = (mm.get("dots") or {}).get("blue") or []
-            mm_red = (mm.get("dots") or {}).get("red") or []
+        # v2.12 敌人红条追击（先于小地图决策）：可见红条 -> 朝红条移动
+        if enemy_bars:
+            nearest_bar = min(enemy_bars, key=lambda b: math.hypot(
+                b[0] / w - 0.5, (b[1] / h - 0.5) * (h / w)))
+            bx, by = nearest_bar[0] / w, nearest_bar[1] / h
+            if 0.0 <= bx <= 1.0 and 0.0 <= by <= 1.0:
+                target = (bx, by)
+                reason = "chase_enemy_bar"
+        if target is None:
+            # 移动决策（用户规则：通过小地图观察敌我位置）：
+            #   1) 跟随队友：屏幕 ally_hero 优先；否则小地图蓝点中离发育路最近的（射手优先）
+            #   2) 无队友：朝小地图红点（支援战斗）
+            #   3) 无红点：朝发育路方向（按阵营镜像）
+            # v2.12：红条追击已在上面设置 target，此处只处理 target 仍为空的情况
+            camp = cooldowns.get("camp") or "blue"
+            lane = LANE_DIR_BLUE if camp == "blue" else LANE_DIR_RED
+            mm = state_dict.get("minimap") or {}
+            mm_blue, mm_red = [], []
+            if mm.get("found"):
+                mm_blue = (mm.get("dots") or {}).get("blue") or []
+                mm_red = (mm.get("dots") or {}).get("red") or []
 
-        # v2.7 开局保护：对局确认后前 15 秒只朝发育路走
-        # （开局红点/蓝点检测不稳，乱支援会导致泉水乱转）
-        match_t = float(cooldowns.get("match_start_t", 0.0))
-        in_opening = match_t > 0 and now - match_t < 15.0
-        na = nearest(allies)
-        if na is not None and not in_opening:
-            target = (na[0], na[1])
-            reason = "follow_ally"
-        elif mm_blue and not in_opening:
-            # 射手优先：离发育路方向最近的蓝点（射手常在发育路）
-            # v2.7：不再排除"己方点"（离圆心最近≠己方，会误判导致目标错乱），
-            # 目标跳变由滞回处理
-            lx, ly = lane
-            target = min(mm_blue, key=lambda p: (p[0] - lx) ** 2 + (p[1] - ly) ** 2)
-            reason = "follow_ally_minimap"
-        elif mm_red and not in_opening:
-            lx = sum(p[0] for p in mm_red) / len(mm_red)
-            ly = sum(p[1] for p in mm_red) / len(mm_red)
-            target = (lx, ly)
-            reason = "support_red_centroid"
-        else:
-            lx, ly = lane
-            target = (lx, ly)
-            reason = "lane_develop"
+            # v2.7 开局保护：对局确认后前 15 秒只朝发育路走
+            # （开局红点/蓝点检测不稳，乱支援会导致泉水乱转）
+            match_t = float(cooldowns.get("match_start_t", 0.0))
+            in_opening = match_t > 0 and now - match_t < 15.0
+            na = nearest(allies)
+            if na is not None and not in_opening:
+                target = (na[0], na[1])
+                reason = "follow_ally"
+            elif mm_blue and not in_opening:
+                # 射手优先：离发育路方向最近的蓝点（射手常在发育路）
+                # v2.7：不再排除"己方点"（离圆心最近≠己方，会误判导致目标错乱），
+                # 目标跳变由滞回处理
+                lx, ly = lane
+                target = min(mm_blue, key=lambda p: (p[0] - lx) ** 2 + (p[1] - ly) ** 2)
+                reason = "follow_ally_minimap"
+            elif mm_red and not in_opening:
+                lx = sum(p[0] for p in mm_red) / len(mm_red)
+                ly = sum(p[1] for p in mm_red) / len(mm_red)
+                target = (lx, ly)
+                reason = "support_red_centroid"
+            else:
+                lx, ly = lane
+                target = (lx, ly)
+                reason = "lane_develop"
     if target is None:
         return {"type": "none", "reason": "no_target"}
     # v2.7 目标滞回：蓝点噪声导致目标每帧跳变 -> 目标需稳定 HOLD_S 秒才切换
@@ -749,17 +778,37 @@ def main():
             frame_id += 1
             st.t = time.time()  # 决策时刻
             state_dict = st.to_dict()
-            # 低血量决策：读取 HP/MP（左下角血条，低频 0.5s 一次）
+            # ---- 理解层增强（v2.12）：自己HP/MP + 敌人红条 + 队友条 + 阵容 ----
             if now - float(cooldowns.get("hp_t", 0.0)) >= 0.5:
-                from wzry.vision.ui_reader import read_ui
-                ui_res = read_ui(frame, skills_pts)
                 cooldowns["hp_t"] = now
-                if ui_res["hp_bar"]:
-                    state_dict.setdefault("ui", {})["hp"] = ui_res["hp_bar"][-1]
-                if ui_res["mp_bar"]:
-                    state_dict.setdefault("ui", {})["mp"] = ui_res["mp_bar"][-1]
-                if ui_res["skill_states"]:
-                    state_dict.setdefault("ui", {})["skill_states"] = ui_res["skill_states"]
+                try:
+                    from wzry.vision.self_bars import self_hp_mp, detect_all_bars
+                    hp, mp, hero_pos = self_hp_mp(frame)
+                    if hp is not None:
+                        state_dict.setdefault("ui", {})["hp"] = hp
+                    if mp is not None:
+                        state_dict.setdefault("ui", {})["mp"] = mp
+                    if hero_pos:
+                        state_dict.setdefault("extra", {})["hero_pos"] = list(hero_pos)
+                    bars = detect_all_bars(frame)
+                    if bars["enemies"]:
+                        state_dict.setdefault("extra", {})["enemy_bars"] = [
+                            (b["x"], b["y"], b["w"]) for b in bars["enemies"]]
+                    if bars["allies"]:
+                        state_dict.setdefault("extra", {})["ally_bars"] = [
+                            (b["x"], b["y"], b["w"]) for b in bars["allies"]]
+                except Exception:
+                    pass
+                # 技能状态（校准坐标）
+                try:
+                    from wzry.vision.ui_reader import skill_ready_state
+                    ss = skill_ready_state(frame, skills_pts)
+                    state_dict.setdefault("ui", {})["skill_states"] = ss
+                except Exception:
+                    pass
+                # 阵容（如已识别）
+                if cooldowns.get("roster"):
+                    state_dict.setdefault("extra", {})["roster"] = cooldowns["roster"]
             n_ticks += 1
             infer_sum += det.last_infer_ms
 
