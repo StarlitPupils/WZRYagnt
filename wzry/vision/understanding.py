@@ -75,14 +75,53 @@ class Understanding:
         """队友/敌人状态（占位：当前返回空，后续用头像条 ROI 检测）。"""
         return {"teammates": [], "enemies": []}
 
+    # ---------- 英雄识别（小地图英雄圈 -> 英雄名） ----------
+    def _recognize_minimap_heroes(self, frame):
+        """识别小地图上每个英雄圈对应的英雄名（裁剪圈内头像 -> 模板匹配）。"""
+        mm = self._last.get("minimap") if self._last else None
+        if mm is None:
+            return {"self": None, "allies": [], "enemies": []}
+        try:
+            from wzry.vision.hero_recognition import HeroRecognizer
+            rec = HeroRecognizer()
+        except Exception:
+            rec = None
+        x0, y0, x1, y1 = self.mm_box
+        out = {"self": None, "allies": [], "enemies": []}
+        if rec is None:
+            return out
+
+        def identify(pos):
+            """裁剪小地图英雄圈内头像并识别。pos=(nx,ny) 归一化。"""
+            nx, ny = pos
+            cx = int(x0 + nx * (x1 - x0))
+            cy = int(y0 + ny * (y1 - y0))
+            r = int((x1 - x0) * 0.06)   # 英雄圈半径（小地图宽度的6%）
+            crop = frame[max(0, cy - r):cy + r, max(0, cx - r):cx + r]
+            if crop.size == 0:
+                return None
+            crop = cv2.resize(crop, (96, 96), interpolation=cv2.INTER_AREA)
+            res = rec.recognize(crop)
+            return res[0][0] if res else None
+
+        if mm.get("self"):
+            out["self"] = {"pos": mm["self"][0], "hero": identify(mm["self"][0])}
+        for p in mm.get("allies", []):
+            out["allies"].append({"pos": p, "hero": identify(p)})
+        for p in mm.get("enemies", []):
+            out["enemies"].append({"pos": p, "hero": identify(p)})
+        return out
+
     # ---------- 组合入口 ----------
-    def update(self, frame):
-        """帧 → 结构化理解 dict。"""
+    def update(self, frame, recognize=False):
+        """帧 → 结构化理解 dict。recognize=True 时额外做英雄识别（较慢）。"""
         status = {
             "minimap": self._minimap(frame),
             "self": self._self_status(frame),
             "others": self._others(frame),
         }
+        if recognize:
+            status["heroes"] = self._recognize_minimap_heroes(frame)
         self._last = status
         return status
 

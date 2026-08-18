@@ -137,16 +137,57 @@ class HeroRecognizer:
         return scores[:top_k]
 
 
+class HeroCNNPredictor:
+    """CNN 英雄识别（强化训练版）：data 增强训练的小 CNN。
+
+    模型：runs/heroes/hero_cnn.pt + hero_classes.json
+    输入：头像裁剪图（任意尺寸，内部缩放到 96x96）
+    输出：[(英雄名, 概率), ...]（top_k）
+    """
+
+    def __init__(self, checkpoint=None):
+        import torch
+        ckpt = checkpoint or str(ROOT / "runs" / "heroes" / "hero_cnn.pt")
+        cls_file = str(Path(ckpt).with_name("hero_classes.json"))
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.classes = json.loads(Path(cls_file).read_text(encoding="utf-8"))
+        self.id2cls = {int(k): v for k, v in self.classes.items()}
+        self.n_classes = len(self.id2cls)
+        from scripts.train.train_hero_cnn import HeroCNN
+        self.net = HeroCNN(self.n_classes)
+        self.net.load_state_dict(torch.load(ckpt, map_location=self.device))
+        self.net.eval().to(self.device)
+        self._torch = torch
+        print(f"[hero-cnn] 加载 {self.n_classes} 类模型 {ckpt}")
+
+    def recognize(self, img, top_k=3):
+        """头像裁剪图 -> [(英雄名, 概率), ...]"""
+        import cv2
+        import numpy as np
+        x = cv2.resize(img, (96, 96), interpolation=cv2.INTER_AREA)
+        x = x.astype(np.float32) / 255.0
+        x = x.transpose(2, 0, 1)[None]          # (1,3,96,96)
+        t = self._torch.from_numpy(x).to(self.device)
+        with self._torch.no_grad():
+            logits = self.net(t)[0]
+            prob = self._torch.softmax(logits, 0).cpu().numpy()
+        top = np.argsort(-prob)[:top_k]
+        return [(self.id2cls[int(i)], float(prob[i])) for i in top]
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
         print(f"英雄总数: {len(ALL_HEROES)}")
-        print(f"模板库: {HERO_DIR}（{len(list(HERO_DIR.glob('*.png')) if HERO_DIR.exists() else [])} 个）")
-        print("用法: python hero_recognition.py <头像图片路径>")
+        print("用法: python hero_recognition.py <头像图片路径> [--cnn]")
     else:
         img = cv2.imread(sys.argv[1])
         if img is None:
             print("无法读取图片")
         else:
-            r = HeroRecognizer()
+            use_cnn = "--cnn" in sys.argv
+            if use_cnn:
+                r = HeroCNNPredictor()
+            else:
+                r = HeroRecognizer()
             print("识别结果:", r.recognize(img))
