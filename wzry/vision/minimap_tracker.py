@@ -87,12 +87,15 @@ class MinimapTracker:
         return best
 
     def _plausible(self, frame, center, radius):
-        """圆点结构门控：英雄点蓝/红各 1-5 个才可信（排除 UI 圆圈/场景误检）。"""
+        """圆点结构门控：v2.8 任一颜色英雄点 1-8 个即可信（红方地形可能过检）。"""
         fake = {"found": True, "center": center, "radius": radius}
         det = minimap.detect_dots(frame, fake)
         n_blue = len(det["dots"]["blue"])
         n_red = len(det["dots"]["red"])
-        return (1 <= n_blue <= 5 and 1 <= n_red <= 5), det
+        n_yellow = len(det["dots"]["yellow"])
+        n_green = len(det["dots"]["green"])
+        total = n_blue + n_red + n_yellow + n_green
+        return (1 <= total <= 12), det
 
     # ---------- 主入口 ----------
     def update(self, frame):
