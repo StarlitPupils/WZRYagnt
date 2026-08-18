@@ -86,17 +86,26 @@ class Understanding:
             "skills": skill_states,
         }
 
-    # ---------- 队友/敌人（顶部头像条 + 右上角） ----------
+    # ---------- 队友/敌人（顶部头像条 + 血条颜色定位） ----------
     def _others(self, frame):
-        """队友头像条 + 右上角敌方信息（teammate_bar）。"""
+        """队友头像条 + 三色血条（绿=自己/蓝=队友/红=敌人）位置。"""
+        result = {"teammates": [], "enemies": [], "bar_self": [],
+                  "bar_allies": [], "bar_enemies": []}
         try:
             from wzry.vision.teammate_bar import detect_teammates, detect_enemies
-            return {
-                "teammates": detect_teammates(frame),
-                "enemies": detect_enemies(frame),
-            }
+            result["teammates"] = detect_teammates(frame)
+            result["enemies"] = detect_enemies(frame)
         except Exception:
-            return {"teammates": [], "enemies": []}
+            pass
+        try:
+            from wzry.vision.self_bars import detect_all_bars
+            bars = detect_all_bars(frame)
+            result["bar_self"] = bars.get("self", [])
+            result["bar_allies"] = bars.get("allies", [])
+            result["bar_enemies"] = bars.get("enemies", [])
+        except Exception:
+            pass
+        return result
 
     # ---------- 英雄识别（小地图英雄圈 -> 英雄名） ----------
     def _recognize_minimap_heroes(self, frame):

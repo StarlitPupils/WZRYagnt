@@ -62,7 +62,12 @@ def _find_bars(frame, hue_cond, label):
 
 
 def detect_all_bars(frame):
-    """检测所有英雄血条：绿=自己、蓝=队友、红=敌人。"""
+    """检测所有英雄血条：绿=自己、蓝=队友、红=敌人。
+
+    蓝条（队友）过滤：
+      - 宽度 <= 80（场景/UI 宽条误检排除）
+      - 远离自己绿条（自己蓝量条不算队友）
+    """
     def is_green(H, S, V):
         return (H >= 35) & (H <= 90) & (S > 50)
 
@@ -72,11 +77,25 @@ def detect_all_bars(frame):
     def is_red(H, S, V):
         return ((H <= 15) | (H >= 165)) & (S > 60)
 
-    return {
+    result = {
         "self": _find_bars(frame, is_green, "self"),
         "allies": _find_bars(frame, is_blue, "ally"),
         "enemies": _find_bars(frame, is_red, "enemy"),
     }
+    # 蓝条过滤：宽条（>80）排除；自己绿条旁 60px 内的蓝条=自己蓝量，排除
+    if result["self"]:
+        self_bars = result["self"]
+        my_x = self_bars[0]["x"] if self_bars else None
+        my_y = self_bars[0]["y"] if self_bars else None
+        if my_x is not None:
+            result["allies"] = [
+                b for b in result["allies"]
+                if b["w"] <= 80
+                and not (abs(b["x"] - my_x) < 60 and abs(b["y"] - my_y) < 40)
+            ]
+    else:
+        result["allies"] = [b for b in result["allies"] if b["w"] <= 80]
+    return result
 
 
 def _find_self_hero(frame):
