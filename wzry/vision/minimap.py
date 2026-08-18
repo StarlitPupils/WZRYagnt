@@ -587,7 +587,7 @@ def detect_dots(frame, minimap, debug=False):
     area_hero_lo = np.pi * (FRAC_HERO_LO * r) ** 2
     area_hero_hi = np.pi * (FRAC_HERO_HI * r) ** 2
 
-    def _classify(area, comp=None, bright=False):
+    def _classify(area, comp=None, bright=False, color=None):
         """返回 "noise" | "tower" | "hero" | "minion"。
 
         v2.8 真机标定（方形小地图 232x232，r=116 时）：
@@ -598,11 +598,15 @@ def detect_dots(frame, minimap, debug=False):
         """
         if area < 10 or area > 700:
             return "noise"
-        if comp is not None and comp < 0.4:
+        if comp is not None and comp < 0.45:
             return "noise"
         if area >= 60:
+            # v2.9：英雄圈需近圆形（comp>=0.55），排除红色地形碎片
+            if comp is not None and comp < 0.55:
+                return "noise"
             return "hero"
-        if comp is not None and comp < 0.7:
+        # v2.9：只有蓝/红小点才算塔（塔有阵营色）；黄色/绿色小点=野怪/小兵
+        if color in ("blue", "red") and comp is not None and comp < 0.7:
             return "tower"     # 矩形（长宽比大）= 塔
         return "minion"
 
@@ -625,10 +629,12 @@ def detect_dots(frame, minimap, debug=False):
 
     for color in ("blue", "red", "yellow", "green"):
         m = masks[color] & disk
-        # v2.8：先开运算去噪；蓝/红/绿再闭运算合并（英雄圈+箭头连成一体），
-        # 黄色（野怪小点）保持独立不做闭运算
-        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-        if color != "yellow":
+        # v2.9：蓝色/红色/绿色先开运算去噪再闭运算合并（英雄圈+箭头连成一体）；
+        # 黄色（野怪小点 6x7）保持原始，不做形态学（避免小点消失）
+        if color == "yellow":
+            pass
+        else:
+            m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
             m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         n, lab, st, cent = cv2.connectedComponentsWithStats(m, 8)
         for i in range(1, n):
@@ -642,7 +648,7 @@ def detect_dots(frame, minimap, debug=False):
             bbox = gray_full[y0c:y0c + h_, x0c:x0c + w_]
             gmean = float(bbox.mean()) if bbox.size else 0.0
             bright = gmean > 90
-            cls = _classify(area, comp=comp, bright=bright)
+            cls = _classify(area, comp=comp, bright=bright, color=color)
             if cls == "noise":
                 continue
             px, py = float(cent[i][0]), float(cent[i][1])
@@ -657,7 +663,11 @@ def detect_dots(frame, minimap, debug=False):
                 dots[color].append([nx, ny])
                 detail[color].append(rec)
             elif cls == "minion":
-                if color != "yellow":   # 黄点=野怪，不进 minions（yellow 无 minion 语义）
+                if color == "yellow":
+                    # 黄点 = 野怪（无论大小都算野怪标记）
+                    dots["yellow"].append([nx, ny])
+                    detail["yellow"].append(rec)
+                else:
                     minions[color].append([nx, ny])
                     detail["minions"][color].append(rec)
             else:  # tower
