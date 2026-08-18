@@ -67,13 +67,13 @@ class AdbExecutor:
         return serials[0]
 
     # ---------- 基础命令 ----------
-    def _run(self, args):
+    def _run(self, args, timeout=15):
         t0 = time.perf_counter()
         with self._lock:
             r = subprocess.run(
                 [ADB, "-s", self.serial] + args,
                 capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=3,
+                errors="replace", timeout=timeout,
             )
         self.last_cmd_ms = (time.perf_counter() - t0) * 1000.0
         self.cmd_count += 1
