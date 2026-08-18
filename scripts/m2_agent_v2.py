@@ -609,7 +609,8 @@ def main():
                  "restore_t": 0.0, "attack_t": 0.0,
                  "skill": 0.0, "hook_pending": 0.0,
                  "hook_anchor_dist": 0.0, "turret_threat": 0.0,
-                 "hook_blocked": 0.0, "match_start_t": 0.0}
+                 "hook_blocked": 0.0, "match_start_t": 0.0,
+                 "roster": None, "roster_pending": 0.0}
     # 技能按钮像素坐标（read_ui 用）
     with open(ROOT / "configs" / "calibration_absolute.json", encoding="utf-8") as _f:
         _pts = json.load(_f)["points"]
@@ -686,6 +687,55 @@ def main():
                 else:
                     print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 未判定（泉水色不明显，默认蓝方）")
 
+            # ---- 开局阵容识别（v2.10：modlens 读选英雄界面文字，含钟馗侧=我方）----
+            # 用后台线程避免阻塞主循环；结果存入 cooldowns["roster"]
+            if not cooldowns.get("roster") and not cooldowns.get("roster_pending"):
+                cooldowns["roster_pending"] = now
+                import threading as _th
+                _frame_cp = frame.copy()
+
+                def _roster_worker(fr):
+                    try:
+                        import subprocess as _sp
+                        import sys as _sys
+                        tmp = ROOT / "temp" / "roster_live.png"
+                        import cv2 as _cv2
+                        _cv2.imwrite(str(tmp), fr)
+                        prompt = ('这是王者荣耀选英雄界面。请列出上方区域(y0-360)的所有英雄名和'
+                                  '下方区域(y360-720)的所有英雄名，用JSON格式输出：'
+                                  '{"upper": ["英雄名"...], "lower": ["英雄名"...]}。'
+                                  '只输出英雄名（去掉皮肤名），格式必须严格是JSON。')
+                        r = _sp.run(
+                            [_sys.executable, "-X", "utf8",
+                             str(ROOT / "scripts" / "train" / "modlens_ask.py"),
+                             str(tmp), prompt],
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=180)
+                        if r.returncode != 0:
+                            print(f"[roster] modlens 失败: {r.stderr[:150]}")
+                            return
+                        txt = r.stdout.strip()
+                        start, end = txt.find("{"), txt.rfind("}")
+                        if start < 0 or end < 0:
+                            print(f"[roster] 解析失败: {txt[:150]}")
+                            return
+                        import json as _json
+                        data = _json.loads(txt[start:end + 1])
+                        upper, lower = data.get("upper", []), data.get("lower", [])
+                        if "钟馗" in upper:
+                            ally, enemy = upper, lower
+                        else:
+                            ally, enemy = lower, upper
+                        cooldowns["roster"] = {"ally": ally, "enemy": enemy,
+                                               "self_hero": "钟馗"}
+                        print(f"[roster] 我方 {ally} | 敌方 {enemy}")
+                    except Exception as e:
+                        print(f"[roster] 异常: {e}")
+                    finally:
+                        cooldowns["roster_pending"] = 0.0
+
+                _th.Thread(target=_roster_worker, args=(_frame_cp,), daemon=True).start()
+
             # ---- 感知（v2.7：YOLO 降频，缓存复用）----
             yolo_count += 1
             if yolo_count >= yolo_every:
@@ -760,6 +810,9 @@ def main():
                 if not recorder.active:
                     recorder.start(meta={"agent": "m2_agent_v2", "model": str(args.model),
                                          "action": "on" if do_action else "off"})
+                # v2.10：阵容写入状态流（决策层可读）
+                if cooldowns.get("roster"):
+                    state_dict.setdefault("extra", {})["roster"] = cooldowns["roster"]
                 recorder.on_state(state_dict)
                 if do_action and action.get("type") != "none":
                     rec = dict(action)
