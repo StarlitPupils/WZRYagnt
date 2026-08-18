@@ -82,6 +82,18 @@ def _debounced(action: dict, now: float, cooldowns: dict) -> dict:
     return action
 
 
+def _nearest_walkable(grid, p, radius=3):
+    """网格中距离 p 半径 radius 内的第一个可走点，找不到返回 None。"""
+    n = grid.shape[0]
+    for r in range(1, radius + 1):
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                y, x = p[0] + dy, p[1] + dx
+                if 0 <= y < n and 0 <= x < n and grid[y, x] > 0:
+                    return (y, x)
+    return None
+
+
 def _hook_path_blocked(target, blockers, half_w, dist_width, aspect):
     """钩子遮挡检查（用户规则 007）：敌人连线视为"粗直线"，
     若线上有敌方小兵/野怪（blockers）且比敌人更近 -> 钩子会被挡，不释放。
@@ -333,8 +345,11 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             reason = "follow_ally"
         elif mm_blue:
             # 射手优先：离发育路方向最近的蓝点（射手常在发育路）
+            # 排除己方点（离圆心最近的蓝点，v2.6 防跟随自己）
             lx, ly = lane
-            target = min(mm_blue, key=lambda p: (p[0] - lx) ** 2 + (p[1] - ly) ** 2)
+            self_p = min(mm_blue, key=lambda p: (p[0] - 0.5) ** 2 + (p[1] - 0.5) ** 2)
+            candidates = [p for p in mm_blue if p != self_p] or mm_blue
+            target = min(candidates, key=lambda p: (p[0] - lx) ** 2 + (p[1] - ly) ** 2)
             reason = "follow_ally_minimap"
         elif mm_red:
             lx = sum(p[0] for p in mm_red) / len(mm_red)
@@ -351,6 +366,39 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     if now - float(cooldowns.get("skill2_t", 0.0)) < HOOK_FLIGHT_S:
         return {"type": "none", "reason": "hook_flight"}
     theta = math.atan2(-(target[1] - 0.5) * aspect, target[0] - 0.5)
+    # ---- 小地图寻路修正（v2.6）：目标方向被墙体挡 -> 用模板 A* 的第一步方向 ----
+    mm = state_dict.get("minimap") or {}
+    # 仅当目标是小地图坐标（lane/support/follow_minimap/retreat）时修正；
+    # follow_ally（屏幕目标）与 chase_enemy 不做寻路（屏幕近距目标直接走）
+    if mm.get("found") and reason in ("lane_develop", "follow_ally_minimap",
+                                      "support_red_centroid", "retreat_low_hp"):
+        from wzry.vision.terrain import astar_path
+        from wzry.vision.terrain_map import load_terrain
+        try:
+            tgrid = load_terrain()
+            n = tgrid.shape[0]
+            # 己方位置（小地图蓝点最近圆心的），目标 = 移动目标（小地图坐标）
+            blues = (mm.get("dots") or {}).get("blue") or []
+            if blues and 0.0 <= target[0] <= 1.0 and 0.0 <= target[1] <= 1.0:
+                self_p = min(blues, key=lambda p: (p[0] - 0.5) ** 2 + (p[1] - 0.5) ** 2)
+                sg = (min(n - 1, max(0, int(self_p[1] * n))),
+                      min(n - 1, max(0, int(self_p[0] * n))))
+                tg = (min(n - 1, max(0, int(target[1] * n))),
+                      min(n - 1, max(0, int(target[0] * n))))
+                # 起点/终点不可走时找最近可走格（半径 3 内）
+                sg = _nearest_walkable(tgrid, sg, 3) or sg
+                tg = _nearest_walkable(tgrid, tg, 3) or tg
+                if tgrid[sg] > 0 and tgrid[tg] > 0:
+                    path = astar_path(tgrid, sg, tg)
+                    if path and len(path) >= 2:
+                        # 第一步方向（网格坐标差 -> 屏幕方向：网格y向下=屏幕y向下）
+                        dgy = path[1][0] - path[0][0]
+                        dgx = path[1][1] - path[0][1]
+                        if dgy or dgx:
+                            theta = math.atan2(dgy, dgx)
+                            reason = f"{reason}_path"
+        except Exception:
+            pass
     # 塔规避：若移动方向朝向威胁塔 → 反向逃离（比垂直绕行更坚决，用户反馈被塔打要赶紧出去）
     if turret_threat and cooldowns.get("turret_threat"):
         tx, ty = nt[0], nt[1]
@@ -500,9 +548,14 @@ def main():
             h, w = frame.shape[:2]
             mc = calib.get("minimap_center", [0.086, 0.129])
             mm_prior = [int(mc[0] * w), int(mc[1] * h)]
-        return MinimapTracker(prior_center=mm_prior)
+        from wzry.vision.minimap_tracker import MinimapTracker
+        from wzry.vision.terrain import DEFAULT_BOX
+        return MinimapTracker(prior_center=mm_prior, box_prior=DEFAULT_BOX)
 
     tracker = None
+    # 撞墙感知（v2.6：轮盘拖动但小地图蓝点不动 -> 绕行）
+    from wzry.vision.wall_sensor import WallSensor
+    wall_sensor = WallSensor()
 
     if do_action:
         from wzry.action.executor_v2 import ActionExecutor
@@ -617,6 +670,22 @@ def main():
             if sig != last_sig:
                 print(f"[{datetime.now():%H:%M:%S}] [决策] {format_decision(action)}")
                 last_sig = sig
+
+            # ---- 撞墙感知（v2.6）：移动中蓝点不动 -> 绕行 ----
+            if action.get("type") == "move":
+                # 己方蓝点：小地图蓝点中离圆心最近的（通常是自己）
+                hero_pos = None
+                if mm.get("found"):
+                    blues = (mm.get("dots") or {}).get("blue") or []
+                    if blues:
+                        hero_pos = min(blues, key=lambda p: (p[0]-0.5)**2 + (p[1]-0.5)**2)
+                wall_hit = wall_sensor.update(now, True, hero_pos)
+                if wall_hit:
+                    action = wall_sensor.avoid_action(float(action.get("theta", 0.0)))
+                    print(f"[{datetime.now():%H:%M:%S}] [撞墙] 蓝点未动 -> 绕行")
+                    sig = ("move", None)
+            else:
+                wall_sensor.update(now, False, None)
 
             # ---- 钩子射程测量记录（自动标定二技能范围）----
             if action.get("type") == "skill" and action.get("id") == 2:

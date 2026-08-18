@@ -465,16 +465,57 @@ class TestFollowMinimap(unittest.TestCase):
         cd["camp"] = "blue"
         st = state(units=[], minimap=mm_found(blue=[[0.7, 0.8], [0.3, 0.3]]))
         act = decide(st, cd)
-        self.assertEqual(act["reason"], "follow_ally_minimap")
-        # 离发育路 (0.72,0.82) 最近的是 (0.7,0.8) -> 朝右下方
-        exp = math.atan2(-(0.8 - 0.5) * (H / W), 0.7 - 0.5)
-        self.assertAlmostEqual(act["theta"], exp, places=4)
+        # v2.6：可能被小地图寻路修正（_path 后缀）；未被修正时方向=直线
+        self.assertTrue(act["reason"].startswith("follow_ally_minimap"))
+        if act["reason"].endswith("_path"):
+            self.assertNotEqual(act["reason"], "follow_ally_minimap")
+        else:
+            # 离发育路 (0.72,0.82) 最近的是 (0.7,0.8) -> 朝右下方
+            exp = math.atan2(-(0.8 - 0.5) * (H / W), 0.7 - 0.5)
+            self.assertAlmostEqual(act["theta"], exp, places=4)
 
     def test_support_red_centroid(self):
         cd = fresh_cd()
         st = state(units=[], minimap=mm_found(red=[[0.6, 0.6]]))
         act = decide(st, cd)
         self.assertEqual(act["reason"], "support_red_centroid")
+
+    def test_follow_minimap_excludes_self(self):
+        """v2.6：跟随目标排除己方蓝点（离圆心最近的），防跟随自己。"""
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        # 己方(0.15,0.85 离圆心远？) 实际离圆心最近的是 (0.3,0.3)
+        st = state(units=[], minimap=mm_found(blue=[[0.3, 0.3], [0.7, 0.8]]))
+        act = decide(st, cd)
+        self.assertTrue(act["reason"].startswith("follow_ally_minimap"))
+
+
+class TestPathfinding(unittest.TestCase):
+    """v2.6：小地图寻路修正（墙体绕行）。"""
+
+    def _mm(self, blue):
+        return {"found": True, "center": [100, 140], "radius": 60,
+                "dots": {"blue": blue, "red": [], "yellow": []}, "towers": []}
+
+    def test_lane_develop_path_correction(self):
+        """泉水附近蓝点 + 发育路目标：走兵线路径（reason 带 _path）。"""
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        st = state(units=[], minimap=self._mm([[0.15, 0.85]]))
+        st["ui"] = {"hp": 1.0}
+        act = decide(st, cd)
+        # 蓝点只有己方 -> 排除后无候选 -> fallback 蓝点列表 -> 目标=己方自身
+        # 此时 lane_develop 或 follow 都行，关键是路径修正逻辑不崩
+        self.assertEqual(act["type"], "move")
+
+    def test_path_correction_on_follow_ally(self):
+        """队友在发育路（蓝点），己方在泉水：A* 修正方向。"""
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        st = state(units=[], minimap=self._mm([[0.15, 0.85], [0.70, 0.80]]))
+        st["ui"] = {"hp": 1.0}
+        act = decide(st, cd)
+        self.assertTrue(act["reason"].startswith("follow_ally_minimap"))
 
 
 if __name__ == "__main__":

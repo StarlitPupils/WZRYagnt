@@ -17,18 +17,28 @@ from wzry.vision import minimap
 
 class MinimapTracker:
     def __init__(self, prior_center=None, found_thr=None, relost_after=15,
-                 min_radius_frac=0.09, max_radius_frac=0.22):
+                 min_radius_frac=0.09, max_radius_frac=0.22, box_prior=None):
         self.prior_center = list(prior_center) if prior_center else None
         self.found_thr = found_thr or minimap.FOUND_SCORE_MIN
         self.relost_after = relost_after
         self.min_radius_frac = min_radius_frac
         self.max_radius_frac = max_radius_frac
+        # 方形小地图标定框 (x0, y0, x1, y1)（1280x720 标定，等比缩放）
+        self.box_prior = box_prior
 
         self.center = None
         self.radius = None
         self.lost_streak = 0
         self.last_result = None
         self.last_ms = 0.0
+
+    def _box_prior_center(self, w, h):
+        """标定框中心（等比缩放）。"""
+        if not self.box_prior:
+            return None
+        sx, sy = w / 1280.0, h / 720.0
+        x0, y0, x1, y1 = (int(v * s) for v, s in zip(self.box_prior, (sx, sy, sx, sy)))
+        return [(x0 + x1) // 2, (y0 + y1) // 2], (x1 - x0) // 2
 
     # ---------- 内部工具 ----------
     def _preprocess(self, frame):
@@ -95,8 +105,26 @@ class MinimapTracker:
         gray_f, masks_f = self._preprocess(frame)
 
         det = None
+        # 优先：标定框中心（方形小地图，1280x720 标定值等比缩放）
+        bp = self._box_prior_center(w, h)
+        if bp is not None:
+            (pcx, pcy), pr = bp
+            if self.center is None:
+                # 首帧：用标定框中心直接检测圆点，验证通过即采用
+                fake = {"found": True, "center": [pcx, pcy], "radius": pr}
+                det = minimap.detect_dots(frame, fake)
+                n_blue = len(det["dots"]["blue"])
+                n_red = len(det["dots"]["red"])
+                n_yellow = len(det["dots"]["yellow"])
+                n_tower = len(det["towers"])
+                # 放宽：红/黄/塔点任一存在即可确认小地图（蓝点可能因扎堆合并丢失）
+                if (1 <= n_blue <= 6 or 1 <= n_red <= 6 or n_yellow > 0 or n_tower > 0):
+                    self.center, self.radius = [pcx, pcy], pr
+                    self.lost_streak = 0
+                else:
+                    self.lost_streak += 1
         if self.center is not None and self.lost_streak < self.relost_after:
-            # 跟踪模式
+            # 跟踪模式（围绕已确认中心微扫）
             best = self._scan_around(gray_f, masks_f,
                                      self.center[0], self.center[1],
                                      self.radius, r_lo, r_hi)
@@ -109,8 +137,8 @@ class MinimapTracker:
                     self.lost_streak += 1
             else:
                 self.lost_streak += 1
-        else:
-            # 全扫描模式（种子 = 先验圆心）
+        elif self.center is None:
+            # 全扫描模式（标定框失败时的后备；种子 = 标定中心）
             res = minimap.find_minimap(frame, prior=self.prior_center)
             if res["found"]:
                 ok, det = self._plausible(frame, res["center"], res["radius"])
