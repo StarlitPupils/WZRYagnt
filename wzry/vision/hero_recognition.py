@@ -93,10 +93,19 @@ class HeroRecognizer:
         self.index = index or load_index()
         self._templates = {}
         for name, path in self.index.items():
-            img = cv2.imread(str(path))
+            img = self._imread_unicode(path)
             if img is not None:
                 self._templates[name] = img
         print(f"[heroes] 加载 {len(self._templates)} 个英雄模板")
+
+    @staticmethod
+    def _imread_unicode(path):
+        """支持中文路径的图片读取（cv2.imread 在 Windows 不支持非 ASCII）。"""
+        try:
+            data = np.fromfile(str(path), dtype=np.uint8)
+            return cv2.imdecode(data, cv2.IMREAD_COLOR)
+        except Exception:
+            return None
 
     def recognize(self, img, top_k=3):
         """识别单个头像裁剪图 -> [(英雄名, 分数), ...]。
