@@ -22,7 +22,8 @@ MUMU_ADB_PORTS = (16384, 7555, 16416, 16448, 16480, 16512)
 def _adb_devices():
     """执行 adb devices，返回在线序列号列表。"""
     try:
-        out = subprocess.run([ADB, "devices"], capture_output=True, text=True, timeout=5).stdout
+        out = subprocess.run([ADB, "devices"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=5).stdout
     except Exception:
         return []
     return [ln.split("\t")[0] for ln in out.splitlines()[1:] if "\tdevice" in ln]
@@ -39,7 +40,8 @@ def discover_mumu_adb_devices():
         for port in MUMU_ADB_PORTS:
             try:
                 subprocess.run([ADB, "connect", f"127.0.0.1:{port}"],
-                               capture_output=True, text=True, timeout=5)
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=5)
             except Exception:
                 continue
         serials = _adb_devices()
@@ -70,7 +72,8 @@ class AdbExecutor:
         with self._lock:
             r = subprocess.run(
                 [ADB, "-s", self.serial] + args,
-                capture_output=True, text=True, timeout=3,
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=3,
             )
         self.last_cmd_ms = (time.perf_counter() - t0) * 1000.0
         self.cmd_count += 1

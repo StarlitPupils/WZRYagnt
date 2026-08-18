@@ -13,9 +13,11 @@
      → skill_cast(2, 'tap')，冷却节流 > 3s；
   2. 敌人近（enemy_hero 中心距屏幕中心 < 0.25 屏宽）
      → skill_cast(1, 'tap')，节流 1.5s；
-  3. 敌人远 → move(朝向最近敌人, r=0.8, 400ms)；
-  4. 无敌人 → 朝兵线方向移动（小地图红点质心方向）；无红点则 idle。
+  3. 敌人贴身（< 0.20 屏宽）且技能不可用 → 普攻（攻击键），节流 1s；
+  4. 敌人远 → move(朝向最近敌人, r=0.8, 400ms)；
+  5. 无敌人 → 朝兵线方向移动（小地图红点质心方向）；无红点则 idle。
   防抖：任何技能释放后 50ms 内不再下发移动。
+  塔：被塔攻击（塔中心 < 0.40 屏宽且无我方小兵）→ 立即反向逃离；
 
 用法：
     venv\\Scripts\\python.exe scripts\\m2_agent_v2.py --seconds 120              # 只观察（默认，安全开关）
@@ -23,6 +25,7 @@
     venv\\Scripts\\python.exe scripts\\m2_agent_v2.py --seconds 120 --action --save   # 执行 + 对局会话采集
 """
 import argparse
+import json
 import math
 import sys
 import time
@@ -60,6 +63,16 @@ RECALL_THROTTLE_S = 20.0      # 回城节流（避免反复点）
 # 塔规避：屏幕存在敌方塔且无我方小兵时，移动方向朝塔则偏转远离
 TURRET_SAFE_FRAC = 0.55       # 塔在屏幕内时与移动目标方向冲突判定阈值
 TURRET_THREAT_FRAC = 0.45     # 塔威胁距离：塔中心距屏幕中心 < 0.45 屏宽才算威胁
+TURRET_ESCAPE_FRAC = 0.40     # 塔中心 < 0.40 屏宽（≈塔射程内）→ 已被塔打，立即反向逃离
+ATTACK_THROTTLE_S = 1.0       # 普攻节流（攻击间隔）
+MELEE_FRAC = 0.20             # 贴身距离：敌人/兵 < 0.20 屏宽且技能冷却 → 普攻
+# ---- v2.5（用户示范局讲解新增规则）----
+HOOK_BLOCK_FRAC = 0.05        # 钩子"粗直线"半宽：路径两侧各 0.05 屏宽内有小兵/野怪 → 不钩（会被挡）
+RESTORE_THROTTLE_S = 10.0     # 恢复键节流
+LOW_RESOURCE_FRAC = 0.80      # HP 或 MP < 80% 且安全 → 按恢复键（用户规则）
+CHASE_BREAK_FRAC = 0.50       # 追击中断：HP < 50% 时停止追击（用户规则：血量降半停止追击撤退）
+ALLY_TOWER_RECALL_FRAC = 0.35  # 残血回城：自家塔中心 < 0.35 屏宽才安全回城（塔下回城）
+SAFE_CLEAR_FRAC = 0.55        # 小地图安全判断：附近红点距离 > 0.55 视为安全（可先清兵再回城）
 
 
 def _debounced(action: dict, now: float, cooldowns: dict) -> dict:
@@ -67,6 +80,36 @@ def _debounced(action: dict, now: float, cooldowns: dict) -> dict:
     if now - float(cooldowns.get("skill", 0.0)) < SKILL_DEBOUNCE_S:
         return {"type": "none", "reason": "skill_debounce"}
     return action
+
+
+def _hook_path_blocked(target, blockers, half_w, dist_width, aspect):
+    """钩子遮挡检查（用户规则 007）：敌人连线视为"粗直线"，
+    若线上有敌方小兵/野怪（blockers）且比敌人更近 -> 钩子会被挡，不释放。
+
+    target: [cx, cy, w, h] 屏幕归一化（我方在屏幕中心 (0.5, 0.5)）
+    判断：blocker 到线段（中心->target）的距离 < half_w 且 blocker 距离 < target 距离
+    """
+    import math
+    tx, ty = target[0], target[1]
+    dx, dy = tx - 0.5, (ty - 0.5) * aspect
+    seg_len = math.hypot(dx, dy)
+    if seg_len < 1e-4:
+        return False
+    for b in blockers:
+        bx, by = b[0], b[1]
+        # 点到线段距离（参数 t 投影）
+        px, py = bx - 0.5, (by - 0.5) * aspect
+        t = (px * dx + py * dy) / (seg_len * seg_len)
+        if t < 0.0 or t > 1.0:
+            continue
+        # 完整垂直距离（x/y 折算后）
+        proj_x = 0.5 + dx * t
+        proj_y = 0.5 + dy * t
+        perp = math.hypot(bx - proj_x, (by - proj_y) * aspect)
+        b_dist = math.hypot(bx - 0.5, (by - 0.5) * aspect)
+        if perp < half_w and b_dist < seg_len * 0.98:
+            return True
+    return False
 
 
 def decide(state_dict: dict, cooldowns: dict) -> dict:
@@ -90,7 +133,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     aspect = (float(h) / float(w)) if w else 0.5625
 
     units = state_dict.get("units") or []
-    enemies, minions, turrets, allies, ally_minions = [], [], [], [], []
+    enemies, minions, turrets, allies, ally_minions, monsters = [], [], [], [], [], []
+    ally_turrets = []
     for u in units:
         cls = str(u.get("cls", ""))
         scr = u.get("screen") or [0.5, 0.5, 0.0, 0.0]
@@ -104,6 +148,10 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             allies.append(scr)
         elif cls == "ally_minion":
             ally_minions.append(scr)
+        elif cls == "neutral_monster":
+            monsters.append(scr)
+        elif cls == "ally_turret":
+            ally_turrets.append(scr)
 
     def dist_width(cx, cy):
         return math.hypot(cx - 0.5, (cy - 0.5) * aspect)
@@ -139,29 +187,55 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         if now - hook_pending > HOOK_CONFIRM_S:
             cooldowns["hook_pending"] = 0.0
 
-    # ---- 0.5) 低血量撤退（用户规则）：HP<20% 朝泉水跑；身边无危险则回城 ----
+    # ---- 0.5) 低血量撤退（用户规则）：HP<20% 回自家塔下再回城 ----
     hp = float((state_dict.get("ui") or {}).get("hp") or 1.0)
     if hp < LOW_HP_FRAC:
         dangerous = any(dist_width(s[0], s[1]) < DANGER_FRAC
                         for s in (enemies + minions))
         camp = cooldowns.get("camp") or "blue"
         fx, fy = FOUNTAIN_DIR_BLUE if camp == "blue" else FOUNTAIN_DIR_RED
-        if not dangerous and ready("recall_t", RECALL_THROTTLE_S):
+        # v2.5：残血回城要在自家塔下（自家塔中心 < 0.35 屏宽）才安全回城
+        nt_ally = nearest(ally_turrets)
+        under_ally_tower = (nt_ally is not None
+                            and dist_width(nt_ally[0], nt_ally[1]) < ALLY_TOWER_RECALL_FRAC)
+        if not dangerous and under_ally_tower and ready("recall_t", RECALL_THROTTLE_S):
             cooldowns["recall_t"] = now
             return {"type": "recall", "reason": "low_hp_safe_recall"}
+        # 不在塔下 -> 朝自家塔走（无塔可见则朝泉水）
+        if nt_ally is not None:
+            tx, ty = nt_ally[0], nt_ally[1]
+            return {"type": "move", "theta": math.atan2(-(ty - 0.5) * aspect, tx - 0.5),
+                    "r": 1.0, "duration_ms": MOVE_DURATION_MS,
+                    "reason": "retreat_to_ally_tower"}
         return {"type": "move", "theta": math.atan2(-(fy - 0.5) * aspect, fx - 0.5),
                 "r": 1.0, "duration_ms": MOVE_DURATION_MS,
                 "reason": "retreat_low_hp"}
+
+    # ---- 0.6) 恢复键（用户规则）：HP 或 MP < 80% 且身边安全 → 按恢复键 ----
+    ui = state_dict.get("ui") or {}
+    mp = float(ui.get("mp") or 1.0)
+    if (hp < LOW_RESOURCE_FRAC or mp < LOW_RESOURCE_FRAC) \
+            and ready("restore_t", RESTORE_THROTTLE_S):
+        near_danger = any(dist_width(s[0], s[1]) < DANGER_FRAC
+                          for s in (enemies + minions + monsters))
+        if not near_danger:
+            cooldowns["restore_t"] = now
+            return {"type": "restore", "reason": "low_resource_safe_restore"}
 
     # ---- 1) 塔规避：敌方塔在近处可见且无我方小兵(ally_minion) → 不进入塔攻击范围 ----
     nt = nearest(turrets)
     turret_threat = bool(turrets) and not ally_minions and nt is not None \
         and dist_width(nt[0], nt[1]) < TURRET_THREAT_FRAC
     if turret_threat:
+        tx, ty = nt[0], nt[1]
+        # 已在塔攻击范围内（塔中心 < ESCAPE_FRAC）→ 立即反向逃离（用户反馈：被塔打不知道出去）
+        if dist_width(tx, ty) < TURRET_ESCAPE_FRAC:
+            away_theta = math.atan2(-(ty - 0.5) * aspect, -(tx - 0.5))
+            return {"type": "move", "theta": away_theta, "r": 1.0,
+                    "duration_ms": MOVE_DURATION_MS, "reason": "escape_turret"}
         ne = nearest(enemies)
         if ne is None:
             # 无敌人时也不朝塔方向走（朝远离塔方向）
-            tx, ty = nt[0], nt[1]
             away_theta = math.atan2(-(ty - 0.5) * aspect, -(tx - 0.5))
             return {"type": "move", "theta": away_theta, "r": MOVE_R,
                     "duration_ms": MOVE_DURATION_MS, "reason": "avoid_turret"}
@@ -170,20 +244,37 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     else:
         cooldowns["turret_threat"] = 0.0
 
-    # ---- 2) 二技能：敌方英雄在钩子范围内 ----
+    # ---- 2) 二技能：敌方英雄在钩子范围内（v2.5 增加：钩子路径被小兵/野怪挡住则不钩）----
+    skill_states = (state_dict.get("ui") or {}).get("skill_states") or {}
     if enemies:
         ne = nearest(enemies)
         d = dist_width(ne[0], ne[1])
         if d <= SKILL2_RANGE_FRAC and ready("skill2_t", SKILL2_THROTTLE_S):
-            cooldowns["skill2_t"] = now
-            cooldowns["skill"] = now
-            cooldowns["hook_pending"] = now
-            cooldowns["hook_anchor_dist"] = d
-            return {"type": "skill", "id": 2, "mode": "tap", "reason": "enemy_in_skill2_range"}
+            # 技能解锁检查（v2.5）：未解锁（灰暗）不释放
+            s2 = skill_states.get("2") or {}
+            if s2.get("unlocked") is False:
+                pass  # 未解锁 -> 跳过钩子，落普攻/移动
+            else:
+                # 钩子遮挡检查（用户规则 007）：敌人连线"粗直线"上有敌兵/野怪 -> 不钩
+                blocked = _hook_path_blocked(
+                    ne, minions + monsters, HOOK_BLOCK_FRAC, dist_width, aspect)
+                if not blocked:
+                    cooldowns["skill2_t"] = now
+                    cooldowns["skill"] = now
+                    cooldowns["hook_pending"] = now
+                    cooldowns["hook_anchor_dist"] = d
+                    return {"type": "skill", "id": 2, "mode": "tap",
+                            "reason": "enemy_in_skill2_range"}
+                cooldowns["hook_blocked"] = 1.0
+            cooldowns["hook_blocked"] = cooldowns.get("hook_blocked", 0.0)
+        else:
+            cooldowns["hook_blocked"] = 0.0
 
-    # ---- 3) 一技能：不在大招生效期 且 敌人/敌兵在身边 ----
+    # ---- 3) 一技能：不在大招生效期 且 敌人/敌兵在身边（v2.5：未解锁则跳过，落普攻）----
     in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= SKILL3_ACTIVE_S
-    if not in_ult and ready("skill1_t", SKILL1_THROTTLE_S):
+    s1 = skill_states.get("1") or {}
+    if not in_ult and s1.get("unlocked") is not False \
+            and ready("skill1_t", SKILL1_THROTTLE_S):
         ne = nearest(enemies)
         ne_m = nearest(minions)
         d_e = dist_width(ne[0], ne[1]) if ne else float("inf")
@@ -194,7 +285,29 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             return {"type": "skill", "id": 1, "mode": "tap",
                     "reason": "enemy_or_minion_near"}
 
+    # ---- 3.5) 普攻：敌人/敌兵贴身（< MELEE_FRAC）且技能不可用/冷却时 → 攻击键 ----
+    # （用户反馈：面对敌方英雄不攻击、被动挨打 → 贴身时用普攻）
+    if ready("attack_t", ATTACK_THROTTLE_S):
+        ne = nearest(enemies)
+        ne_m = nearest(minions)
+        d_e = dist_width(ne[0], ne[1]) if ne else float("inf")
+        d_m = dist_width(ne_m[0], ne_m[1]) if ne_m else float("inf")
+        if min(d_e, d_m) < MELEE_FRAC:
+            cooldowns["attack_t"] = now
+            return {"type": "attack", "priority": "free", "reason": "melee_attack"}
+
     # ---- 4) 移动：持续拖动 ----
+    # v2.5（用户规则 005）：追击中血量降半 -> 停止追击，向自家塔/泉水撤退
+    if enemies and hp < CHASE_BREAK_FRAC:
+        camp = cooldowns.get("camp") or "blue"
+        fx, fy = FOUNTAIN_DIR_BLUE if camp == "blue" else FOUNTAIN_DIR_RED
+        target = (fx, fy)
+        reason = "stop_chase_low_hp_retreat"
+        theta = math.atan2(-(fy - 0.5) * aspect, fx - 0.5)
+        if now - float(cooldowns.get("skill2_t", 0.0)) < HOOK_FLIGHT_S:
+            return {"type": "none", "reason": "hook_flight"}
+        return {"type": "move", "theta": theta, "r": 1.0,
+                "duration_ms": MOVE_DURATION_MS, "reason": reason}
     target = None
     reason = None
     if enemies:
@@ -238,17 +351,15 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     if now - float(cooldowns.get("skill2_t", 0.0)) < HOOK_FLIGHT_S:
         return {"type": "none", "reason": "hook_flight"}
     theta = math.atan2(-(target[1] - 0.5) * aspect, target[0] - 0.5)
-    # 塔规避：若移动方向朝向威胁塔，垂直绕行（比反向更平滑，减少摆动）
+    # 塔规避：若移动方向朝向威胁塔 → 反向逃离（比垂直绕行更坚决，用户反馈被塔打要赶紧出去）
     if turret_threat and cooldowns.get("turret_threat"):
         tx, ty = nt[0], nt[1]
         t_theta = math.atan2(-(ty - 0.5) * aspect, tx - 0.5)
         diff = abs(((theta - t_theta + math.pi) % (2 * math.pi)) - math.pi)
-        if diff < math.pi / 4:  # 目标方向与塔同向 -> 垂直绕行（选夹角更大的垂直方向）
-            perp = t_theta + math.pi / 2
-            if abs(((theta - perp + math.pi) % (2 * math.pi)) - math.pi) > math.pi / 2:
-                perp += math.pi
-            return {"type": "move", "theta": perp, "r": MOVE_R,
-                    "duration_ms": MOVE_DURATION_MS, "reason": "avoid_turret"}
+        if diff < math.pi / 4:  # 目标方向与塔同向 -> 直接反向跑出塔范围
+            away_theta = t_theta + math.pi
+            return {"type": "move", "theta": away_theta, "r": 1.0,
+                    "duration_ms": MOVE_DURATION_MS, "reason": "escape_turret"}
     move = {"type": "move", "theta": theta, "r": MOVE_R,
             "duration_ms": MOVE_DURATION_MS, "reason": reason}
     return _debounced(move, now, cooldowns)
@@ -271,6 +382,10 @@ def update_cooldowns(action: dict, cooldowns: dict, now: float):
     elif t == "recall":
         cooldowns["recall_t"] = now
         cooldowns["skill"] = now
+    elif t == "attack":
+        cooldowns["attack_t"] = now
+    elif t == "restore":
+        cooldowns["restore_t"] = now
     elif t == "combo":
         for sub in action.get("actions", []):
             update_cooldowns(sub, cooldowns, now)
@@ -307,6 +422,10 @@ def apply_action(ex, action: dict, cooldowns: dict):
         ex.summoner()
     elif t == "recall":
         ex.recall()
+    elif t == "attack":
+        ex.attack(str(action.get("priority", "free")))
+    elif t == "restore":
+        ex.restore()
     elif t == "combo":
         for i, sub in enumerate(action.get("actions", [])):
             apply_action(ex, sub, cooldowns)
@@ -326,6 +445,8 @@ def format_decision(action: dict) -> str:
         return f"召唤师技能 [{reason}]"
     if t == "recall":
         return f"回城 [{reason}]"
+    if t == "restore":
+        return f"恢复键 [{reason}]"
     if t == "combo":
         names = [f"{a.get('type')}{a.get('id', '')}" for a in action.get("actions", [])]
         return f"连招 {'→'.join(names)} [{reason}]"
@@ -394,8 +515,14 @@ def main():
     recorder = MatchRecorder(base_dir=ROOT / "data" / "matches")
     cooldowns = {"skill1_t": 0.0, "skill2_t": 0.0, "skill3_t": 0.0,
                  "summoner_t": 0.0, "recall_t": 0.0, "hp_t": 0.0,
+                 "restore_t": 0.0, "attack_t": 0.0,
                  "skill": 0.0, "hook_pending": 0.0,
-                 "hook_anchor_dist": 0.0, "turret_threat": 0.0}
+                 "hook_anchor_dist": 0.0, "turret_threat": 0.0,
+                 "hook_blocked": 0.0}
+    # 技能按钮像素坐标（read_ui 用）
+    with open(ROOT / "configs" / "calibration_absolute.json", encoding="utf-8") as _f:
+        _pts = json.load(_f)["points"]
+    skills_pts = {1: _pts["skill1"], 2: _pts["skill2"], 3: _pts["skill3"]}
 
     # 确认制：状态机判定 in_match 后，还需小地图 tracker 连续 2 帧确认
     CONFIRM_FRAMES = 2
@@ -470,13 +597,17 @@ def main():
             frame_id += 1
             st.t = time.time()  # 决策时刻
             state_dict = st.to_dict()
-            # 低血量决策：读取 HP（左下角血条，低频 0.5s 一次）
+            # 低血量决策：读取 HP/MP（左下角血条，低频 0.5s 一次）
             if now - float(cooldowns.get("hp_t", 0.0)) >= 0.5:
-                from wzry.vision.ui_reader import find_hp_bar
-                hp_res = find_hp_bar(frame)
+                from wzry.vision.ui_reader import read_ui
+                ui_res = read_ui(frame, skills_pts)
                 cooldowns["hp_t"] = now
-                if hp_res:
-                    state_dict.setdefault("ui", {})["hp"] = hp_res[-1]
+                if ui_res["hp_bar"]:
+                    state_dict.setdefault("ui", {})["hp"] = ui_res["hp_bar"][-1]
+                if ui_res["mp_bar"]:
+                    state_dict.setdefault("ui", {})["mp"] = ui_res["mp_bar"][-1]
+                if ui_res["skill_states"]:
+                    state_dict.setdefault("ui", {})["skill_states"] = ui_res["skill_states"]
             n_ticks += 1
             infer_sum += det.last_infer_ms
 

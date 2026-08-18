@@ -97,6 +97,11 @@ class ActionExecutor:
         x, y = PTS["recall"]
         return self.ex.tap(x, y, source="policy")
 
+    def restore(self):
+        """恢复键（校准点 restore；回复药/恢复，有冷却）。"""
+        x, y = PTS["restore"]
+        return self.ex.tap(x, y, source="policy")
+
 
 if __name__ == "__main__":
     pass

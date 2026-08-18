@@ -92,18 +92,50 @@ class TestTurretAvoid(unittest.TestCase):
     """规则 1：塔规避。"""
 
     def test_avoid_turret_when_no_allied_minion(self):
-        st = state(units=[enemy_turret(0.7, 0.5)])
+        st = state(units=[enemy_turret(0.92, 0.5)])  # 0.42 屏宽：威胁带（未进 0.40 射程线）
         act = decide(st, fresh_cd())
         self.assertEqual(act["type"], "move")
         self.assertEqual(act["reason"], "avoid_turret")
         # 远离塔：塔在右 -> theta 朝左（±pi 等价）
         self.assertAlmostEqual(math.cos(act["theta"]), math.cos(math.pi), places=4)
 
+    def test_escape_turret_when_very_close(self):
+        st = state(units=[enemy_turret(0.7, 0.5)])  # 0.20 屏宽：塔射程内 -> 逃离
+        act = decide(st, fresh_cd())
+        self.assertEqual(act["reason"], "escape_turret")
+
     def test_no_avoid_when_allied_minion_present(self):
         st = state(units=[enemy_turret(0.7, 0.5),
                           {"cls": "ally_minion", "screen": [0.6, 0.5, 0.04, 0.04]}])
         act = decide(st, fresh_cd())
         self.assertNotEqual(act["reason"], "avoid_turret")
+
+    def test_escape_turret_when_in_range(self):
+        """塔中心 < 0.40（被塔打）且无我方小兵 -> 立即反向逃离（用户反馈修复）。"""
+        st = state(units=[enemy_turret(0.60, 0.50)])  # 0.10 屏宽，塔射程内
+        act = decide(st, fresh_cd())
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "escape_turret")
+        # 塔在右 -> 反向朝左跑（±pi 等价）
+        self.assertAlmostEqual(math.cos(act["theta"]), math.cos(math.pi), places=4)
+
+    def test_escape_turret_beats_skill2(self):
+        """塔射程内即使敌人在钩子范围内也先跑（保命优先，用户反馈：被塔打要赶紧出去）。"""
+        cd = fresh_cd()
+        st = state(units=[enemy_turret(0.60, 0.50), enemy(0.72, 0.50)])
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "escape_turret")
+
+    def test_escape_turret_when_moving_toward_turret(self):
+        """目标方向与塔同向 -> 反向逃离（替代原垂直绕行）。"""
+        cd = fresh_cd()
+        # 塔在右 0.42 屏宽（威胁带 0.40~0.45，未触发射程内逃离），敌人在更右 -> 追敌人会进塔
+        st = state(units=[enemy_turret(0.92, 0.50), enemy(0.97, 0.50)])
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "escape_turret")
+        self.assertAlmostEqual(math.cos(act["theta"]), math.cos(math.pi), places=4)
 
 
 class TestSkill2(unittest.TestCase):
@@ -155,6 +187,43 @@ class TestSkill1(unittest.TestCase):
         st = state(units=[enemy(0.70, 0.50)])
         act = decide(st, cd)
         self.assertNotEqual((act["type"], act.get("id")), ("skill", 1))
+
+
+class TestMeleeAttack(unittest.TestCase):
+    """规则 3.5：贴身敌人/兵且技能不可用 -> 普攻（用户反馈：面对敌方英雄不攻击）。"""
+
+    def test_attack_when_enemy_adjacent_and_skills_cd(self):
+        """敌人贴身（0.1 屏宽）且 2/1 技能都刚放过 -> 普攻。"""
+        cd = fresh_cd()
+        cd["skill2_t"] = T - 0.5   # 2 技能冷却中
+        cd["skill1_t"] = T - 0.5   # 1 技能冷却中
+        st = state(units=[enemy(0.60, 0.50)])  # dx=0.10 < 0.20
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "attack")
+        self.assertEqual(act["reason"], "melee_attack")
+
+    def test_attack_when_enemy_minion_adjacent(self):
+        cd = fresh_cd()
+        cd["skill2_t"] = T - 0.5
+        cd["skill1_t"] = T - 0.5
+        st = state(units=[enemy_minion(0.63, 0.50)])  # dx=0.13 < 0.20
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "attack")
+
+    def test_skill_preempts_attack_when_ready(self):
+        """贴身敌人但 2 技能就绪 -> 钩子优先于普攻。"""
+        cd = fresh_cd()
+        st = state(units=[enemy(0.60, 0.50)])  # dx=0.10，也在钩子范围内
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act.get("id")), ("skill", 2))
+
+    def test_no_attack_when_enemy_far(self):
+        cd = fresh_cd()
+        cd["skill2_t"] = T - 0.5
+        cd["skill1_t"] = T - 0.5
+        st = state(units=[enemy(0.90, 0.50)])  # dx=0.40 > 0.20
+        act = decide(st, cd)
+        self.assertNotEqual(act["type"], "attack")
 
 
 class TestMovement(unittest.TestCase):
@@ -215,7 +284,9 @@ class TestRetreat(unittest.TestCase):
 
     def test_low_hp_safe_recall(self):
         cd = fresh_cd()
-        st = state(units=[], minimap=mm_found())
+        # 自家塔下（0.30 < 0.35）且身边无危险 -> 回城
+        st = state(units=[{"cls": "ally_turret", "screen": [0.80, 0.50, 0.10, 0.10]}],
+                   minimap=mm_found())
         st["ui"] = {"hp": 0.15}
         act = decide(st, cd)
         self.assertEqual(act["type"], "recall")
@@ -239,6 +310,151 @@ class TestRetreat(unittest.TestCase):
         act = decide(st, cd)
         self.assertNotEqual(act["type"], "recall")
         self.assertEqual((act["type"], act.get("id")), ("skill", 2))
+
+
+class TestHookBlock(unittest.TestCase):
+    """v2.5 规则 007：钩子路径被小兵/野怪挡住不钩。"""
+
+    def test_hook_blocked_by_minion(self):
+        cd = fresh_cd()
+        # 敌英 0.26 屏宽（在钩子范围 0.28 内），但路径上有敌兵在 0.10 处同方向
+        st = state(units=[enemy(0.76, 0.50), enemy_minion(0.60, 0.50)])
+        act = decide(st, cd)
+        self.assertNotEqual((act["type"], act.get("id")), ("skill", 2))
+
+    def test_hook_blocked_by_monster(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.76, 0.50),
+                          {"cls": "neutral_monster", "screen": [0.62, 0.50, 0.06, 0.06]}])
+        act = decide(st, cd)
+        self.assertNotEqual((act["type"], act.get("id")), ("skill", 2))
+
+    def test_hook_ok_when_path_clear(self):
+        cd = fresh_cd()
+        # 敌英 0.26，敌兵在旁边但不在直线上（y 偏移大）
+        st = state(units=[enemy(0.76, 0.50), enemy_minion(0.60, 0.70)])
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act.get("id")), ("skill", 2))
+
+    def test_hook_ok_when_minion_behind_enemy(self):
+        cd = fresh_cd()
+        # 敌兵在敌英后面（更远）不挡钩
+        st = state(units=[enemy(0.76, 0.50), enemy_minion(0.90, 0.50)])
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act.get("id")), ("skill", 2))
+
+
+class TestSkillUnlock(unittest.TestCase):
+    """v2.5 规则：技能未解锁（灰暗）时不释放，改用普攻。"""
+
+    def _ui(self, unlocked_map):
+        return {"hp": 1.0, "skill_states": {
+            str(k): {"unlocked": v, "ready": True, "mean_v": 150 if v else 45}
+            for k, v in unlocked_map.items()}}
+
+    def test_skill1_locked_uses_attack(self):
+        cd = fresh_cd()
+        cd["skill2_t"] = T - 2.0  # 2 技能冷却中
+        st = state(units=[enemy(0.70, 0.50)])  # 0.2 贴身
+        st["ui"] = self._ui({"1": False, "2": True, "3": True})
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "attack")
+        self.assertEqual(act["reason"], "melee_attack")
+
+    def test_skill2_locked_no_hook(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.75, 0.50)])  # 0.25 在钩子范围
+        st["ui"] = self._ui({"1": True, "2": False, "3": True})
+        act = decide(st, cd)
+        self.assertNotEqual((act["type"], act.get("id")), ("skill", 2))
+
+    def test_skill2_unlocked_hooks(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.75, 0.50)])
+        st["ui"] = self._ui({"1": True, "2": True, "3": True})
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act.get("id")), ("skill", 2))
+
+
+class TestRestore(unittest.TestCase):
+    """v2.5 规则：HP/MP<80% 且安全 -> 恢复键。"""
+
+    def test_restore_when_low_hp_safe(self):
+        cd = fresh_cd()
+        st = state(units=[], minimap=mm_found())
+        st["ui"] = {"hp": 0.7}
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "restore")
+        self.assertEqual(act["reason"], "low_resource_safe_restore")
+
+    def test_restore_when_low_mp_safe(self):
+        cd = fresh_cd()
+        st = state(units=[], minimap=mm_found())
+        st["ui"] = {"hp": 1.0, "mp": 0.6}
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "restore")
+
+    def test_no_restore_when_danger(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.60, 0.50)])  # 0.10 身边有敌
+        st["ui"] = {"hp": 0.7}
+        act = decide(st, cd)
+        self.assertNotEqual(act["type"], "restore")
+
+    def test_no_restore_when_high_resource(self):
+        cd = fresh_cd()
+        st = state(units=[], minimap=mm_found())
+        st["ui"] = {"hp": 0.95, "mp": 0.9}
+        act = decide(st, cd)
+        self.assertNotEqual(act["type"], "restore")
+
+    def test_restore_throttle(self):
+        cd = fresh_cd()
+        cd["restore_t"] = T - 2.0  # 10s 节流内
+        st = state(units=[], minimap=mm_found())
+        st["ui"] = {"hp": 0.7}
+        act = decide(st, cd)
+        self.assertNotEqual(act["type"], "restore")
+
+
+class TestChaseBreak(unittest.TestCase):
+    """v2.5 规则 005：追击中血量降半 -> 停止追击撤退。"""
+
+    def test_chase_breaks_when_hp_half(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.90, 0.50)])  # 远敌 0.4
+        st["ui"] = {"hp": 0.45}
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "move")
+        self.assertEqual(act["reason"], "stop_chase_low_hp_retreat")
+
+    def test_chase_continues_when_hp_ok(self):
+        cd = fresh_cd()
+        st = state(units=[enemy(0.90, 0.50)])
+        st["ui"] = {"hp": 0.7}
+        act = decide(st, cd)
+        self.assertEqual(act["reason"], "chase_enemy")
+
+
+class TestRecallUnderTower(unittest.TestCase):
+    """v2.5 规则 012：残血回自家塔下再回城。"""
+
+    def test_low_hp_walk_to_ally_tower(self):
+        cd = fresh_cd()
+        # 自家塔在右 0.30 屏宽（<0.35 塔下）-> 直接安全回城
+        st = state(units=[{"cls": "ally_turret", "screen": [0.80, 0.50, 0.10, 0.10]}],
+                   minimap=mm_found())
+        st["ui"] = {"hp": 0.15}
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "recall")
+
+    def test_low_hp_no_tower_walk_to_fountain(self):
+        cd = fresh_cd()
+        st = state(units=[], minimap=mm_found())
+        st["ui"] = {"hp": 0.15}
+        act = decide(st, cd)
+        self.assertEqual(act["type"], "move")
+        self.assertIn(act["reason"], ("retreat_low_hp", "retreat_to_ally_tower"))
 
 
 class TestFollowMinimap(unittest.TestCase):

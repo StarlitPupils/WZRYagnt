@@ -38,11 +38,11 @@ class MatchRecorder:
     def active(self):
         return self._states_fp is not None
 
-    def start(self, meta=None):
-        """开启一个新对局会话。"""
+    def start(self, meta=None, session_name=None):
+        """开启一个新对局会话。session_name 可指定会话目录名（默认时间戳）。"""
         if self.active:
             return
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        ts = session_name or datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         self.session_dir = self.base_dir / ts
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self._frame_dir = self.session_dir / "frames"
