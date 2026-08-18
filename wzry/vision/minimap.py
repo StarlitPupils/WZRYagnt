@@ -660,6 +660,9 @@ def detect_dots(frame, minimap, debug=False):
                 # v2.9：小地图顶部边缘（归一化 y<0.10）的红色是基地/UI，非敌人
                 if color == "red" and ny < 0.10:
                     continue
+                # v2.11：gmean 过高（>115）= 小兵/亮图标误检，非英雄圈
+                if gmean > 115:
+                    continue
                 dots[color].append([nx, ny])
                 detail[color].append(rec)
             elif cls == "minion":
