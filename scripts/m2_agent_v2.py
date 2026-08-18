@@ -309,7 +309,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             return {"type": "attack", "priority": "free", "reason": "melee_attack"}
 
     # ---- 4) 移动：持续拖动 ----
-    # v2.5（用户规则 005）：追击中血量降半 -> 停止追击，向自家塔/泉水撤退
+    # v2.7 目标滞回：目标频繁跳变（蓝点噪声）导致乱转 -> 目标需稳定 HOLD_S 秒才切换
+    TARGET_HOLD_S = 1.5
     if enemies and hp < CHASE_BREAK_FRAC:
         camp = cooldowns.get("camp") or "blue"
         fx, fy = FOUNTAIN_DIR_BLUE if camp == "blue" else FOUNTAIN_DIR_RED
@@ -339,19 +340,22 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             mm_blue = (mm.get("dots") or {}).get("blue") or []
             mm_red = (mm.get("dots") or {}).get("red") or []
 
+        # v2.7 开局保护：对局确认后前 15 秒只朝发育路走
+        # （开局红点/蓝点检测不稳，乱支援会导致泉水乱转）
+        match_t = float(cooldowns.get("match_start_t", 0.0))
+        in_opening = match_t > 0 and now - match_t < 15.0
         na = nearest(allies)
-        if na is not None:
+        if na is not None and not in_opening:
             target = (na[0], na[1])
             reason = "follow_ally"
-        elif mm_blue:
+        elif mm_blue and not in_opening:
             # 射手优先：离发育路方向最近的蓝点（射手常在发育路）
-            # 排除己方点（离圆心最近的蓝点，v2.6 防跟随自己）
+            # v2.7：不再排除"己方点"（离圆心最近≠己方，会误判导致目标错乱），
+            # 目标跳变由滞回处理
             lx, ly = lane
-            self_p = min(mm_blue, key=lambda p: (p[0] - 0.5) ** 2 + (p[1] - 0.5) ** 2)
-            candidates = [p for p in mm_blue if p != self_p] or mm_blue
-            target = min(candidates, key=lambda p: (p[0] - lx) ** 2 + (p[1] - ly) ** 2)
+            target = min(mm_blue, key=lambda p: (p[0] - lx) ** 2 + (p[1] - ly) ** 2)
             reason = "follow_ally_minimap"
-        elif mm_red:
+        elif mm_red and not in_opening:
             lx = sum(p[0] for p in mm_red) / len(mm_red)
             ly = sum(p[1] for p in mm_red) / len(mm_red)
             target = (lx, ly)
@@ -362,6 +366,25 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             reason = "lane_develop"
     if target is None:
         return {"type": "none", "reason": "no_target"}
+    # v2.7 目标滞回：蓝点噪声导致目标每帧跳变 -> 目标需稳定 HOLD_S 秒才切换
+    # （仅对小地图类目标生效；chase_enemy 追敌人不滞回，避免追丢）
+    if reason in ("follow_ally_minimap", "support_red_centroid", "lane_develop"):
+        prev = cooldowns.get("nav_target")
+        prev_t = float(cooldowns.get("nav_target_t", 0.0))
+        if prev is not None:
+            dist = math.hypot(target[0] - prev[0], target[1] - prev[1])
+            if dist > 0.12 and now - prev_t < TARGET_HOLD_S:
+                # 目标跳变但未到切换期 -> 维持旧目标（刷新时间戳，避免永久 hold）
+                target = tuple(prev)
+                reason = f"{reason}_hold"
+                cooldowns["nav_target"] = tuple(target)
+                cooldowns["nav_target_t"] = now
+            else:
+                cooldowns["nav_target"] = tuple(target)
+                cooldowns["nav_target_t"] = now
+        else:
+            cooldowns["nav_target"] = tuple(target)
+            cooldowns["nav_target_t"] = now
     # 钩子飞行期停止移动（等勾中结果，防自己走近误判连招）
     if now - float(cooldowns.get("skill2_t", 0.0)) < HOOK_FLIGHT_S:
         return {"type": "none", "reason": "hook_flight"}
@@ -571,7 +594,7 @@ def main():
                  "restore_t": 0.0, "attack_t": 0.0,
                  "skill": 0.0, "hook_pending": 0.0,
                  "hook_anchor_dist": 0.0, "turret_threat": 0.0,
-                 "hook_blocked": 0.0}
+                 "hook_blocked": 0.0, "match_start_t": 0.0}
     # 技能按钮像素坐标（read_ui 用）
     with open(ROOT / "configs" / "calibration_absolute.json", encoding="utf-8") as _f:
         _pts = json.load(_f)["points"]
@@ -591,6 +614,10 @@ def main():
     n_ticks = 0
     n_actions = 0
     infer_sum = 0.0
+    # v2.7 性能优化：YOLO 降频（每 3 帧检测一次，结果缓存复用）
+    yolo_every = 3
+    yolo_count = 0
+    cached_dets = []
     t_end = time.time() + args.seconds
 
     print("M2 Agent v2 运行中（Ctrl+C 退出）...\n")
@@ -629,6 +656,9 @@ def main():
                 print(f"[{datetime.now():%H:%M:%S}] 对局确认中 {confirm_streak}/{CONFIRM_FRAMES} ...")
                 continue
             confirmed = True
+            # v2.7 开局保护计时（对局确认时刻）
+            if not cooldowns.get("match_start_t"):
+                cooldowns["match_start_t"] = now
 
             # ---- 开局阵营判断（对局确认后第一帧，泉水颜色）----
             if not cooldowns.get("camp"):
@@ -641,8 +671,12 @@ def main():
                 else:
                     print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 未判定（泉水色不明显，默认蓝方）")
 
-            # ---- 感知 ----
-            dets = det.detect(frame)
+            # ---- 感知（v2.7：YOLO 降频，缓存复用）----
+            yolo_count += 1
+            if yolo_count >= yolo_every:
+                yolo_count = 0
+                cached_dets = det.detect(frame)
+            dets = cached_dets
             st = build_state(frame, dets, phase.value, minimap={
                 "found": mm["found"], "center": mm["center"], "radius": mm["radius"],
                 "dots": mm["dots"], "towers": mm["towers"],

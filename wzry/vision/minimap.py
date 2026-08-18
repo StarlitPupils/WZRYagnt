@@ -573,11 +573,23 @@ def detect_dots(frame, minimap, debug=False):
     area_hero_lo = np.pi * (FRAC_HERO_LO * r) ** 2
     area_hero_hi = np.pi * (FRAC_HERO_HI * r) ** 2
 
-    def _classify(area):
-        """返回 "noise" | "tower" | "hero"。塔点略小于英雄点。"""
+    def _classify(area, comp=None, bright=False):
+        """返回 "noise" | "tower" | "hero"。
+
+        v2.7：增加紧凑度与亮度验证，排除河道边缘等狭长连通域：
+          - comp（紧凑度 = 面积/外接矩形面积）：英雄点近圆，comp > 0.55；
+          - bright（连通域内高亮像素占比）：英雄点有亮边框/亮中心。
+        """
         if area < max(2.0, area_noise_max):
             return "noise"
+        if area > area_hero_hi:
+            return "noise"
+        # 紧凑度：排除狭长河道边缘
+        if comp is not None and comp < 0.5:
+            return "noise"
         if area <= area_hero_hi and area >= area_hero_lo:
+            if comp is not None and comp < 0.6:
+                return "tower" if area < area_hero_lo else "noise"
             return "hero"
         if area < area_hero_lo:
             return "tower"
@@ -593,19 +605,32 @@ def detect_dots(frame, minimap, debug=False):
     towers = []
     detail = {"blue": [], "red": [], "yellow": [], "towers": []}
 
+    # 全图灰度（供亮度验证）
+    gray_full = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
     for color in ("blue", "red", "yellow"):
         m = masks[color] & disk
         m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((MORPH_K, MORPH_K), np.uint8))
         n, lab, st, cent = cv2.connectedComponentsWithStats(m, 8)
         for i in range(1, n):
             area = int(st[i, cv2.CC_STAT_AREA])
-            cls = _classify(area)
+            w_ = int(st[i, cv2.CC_STAT_WIDTH])
+            h_ = int(st[i, cv2.CC_STAT_HEIGHT])
+            comp = area / max(1.0, w_ * h_)          # 紧凑度
+            x0c = int(st[i, cv2.CC_STAT_LEFT])
+            y0c = int(st[i, cv2.CC_STAT_TOP])
+            # 亮度验证：连通域内灰度均值（英雄点较亮）
+            bbox = gray_full[y0c:y0c + h_, x0c:x0c + w_]
+            gmean = float(bbox.mean()) if bbox.size else 0.0
+            bright = gmean > 90
+            cls = _classify(area, comp=comp, bright=bright)
             if cls == "noise":
                 continue
             px, py = float(cent[i][0]), float(cent[i][1])
             nx, ny, valid = _norm(px, py)
             rec = {"n": [nx, ny], "px": [round(px, 1), round(py, 1)],
-                   "area": area, "valid": valid}
+                   "area": area, "comp": round(comp, 2), "gmean": round(gmean, 0),
+                   "valid": valid}
             if cls == "hero":
                 dots[color].append([nx, ny])
                 detail[color].append(rec)

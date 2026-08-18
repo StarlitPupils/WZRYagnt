@@ -26,7 +26,9 @@ def fresh_cd():
     return {"skill1_t": 0.0, "skill2_t": 0.0, "skill3_t": 0.0,
             "summoner_t": 0.0, "recall_t": 0.0, "hp_t": 0.0,
             "skill": 0.0, "hook_pending": 0.0,
-            "hook_anchor_dist": 0.0, "turret_threat": 0.0}
+            "hook_anchor_dist": 0.0, "turret_threat": 0.0,
+            "match_start_t": 0.0, "restore_t": 0.0, "attack_t": 0.0,
+            "hook_blocked": 0.0}
 
 def state(units=None, minimap=None, t=T, screen=(W, H)):
     return {"t": t, "screen_size": list(screen), "units": units or [],
@@ -480,11 +482,10 @@ class TestFollowMinimap(unittest.TestCase):
         act = decide(st, cd)
         self.assertEqual(act["reason"], "support_red_centroid")
 
-    def test_follow_minimap_excludes_self(self):
-        """v2.6：跟随目标排除己方蓝点（离圆心最近的），防跟随自己。"""
+    def test_follow_minimap_blue_any(self):
+        """v2.7：跟随发育路最近的蓝点（不再排除己方，目标跳变由滞回处理）。"""
         cd = fresh_cd()
         cd["camp"] = "blue"
-        # 己方(0.15,0.85 离圆心远？) 实际离圆心最近的是 (0.3,0.3)
         st = state(units=[], minimap=mm_found(blue=[[0.3, 0.3], [0.7, 0.8]]))
         act = decide(st, cd)
         self.assertTrue(act["reason"].startswith("follow_ally_minimap"))
@@ -516,6 +517,65 @@ class TestPathfinding(unittest.TestCase):
         st["ui"] = {"hp": 1.0}
         act = decide(st, cd)
         self.assertTrue(act["reason"].startswith("follow_ally_minimap"))
+
+
+class TestTargetHold(unittest.TestCase):
+    """v2.7 目标滞回：蓝点噪声导致目标跳变 -> 稳定期内维持旧目标防乱转。"""
+
+    def _mm(self, blue):
+        return {"found": True, "center": [100, 140], "radius": 60,
+                "dots": {"blue": blue, "red": [], "yellow": []}, "towers": []}
+
+    def test_target_switches_after_hold(self):
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        # 帧1：队友在 (0.70,0.80)
+        st1 = state(units=[], minimap=self._mm([[0.70, 0.80]]), t=100.0)
+        a1 = decide(st1, cd)
+        self.assertTrue(a1["reason"].startswith("follow_ally_minimap"))
+        # 帧2（0.5s 后）：目标跳变到 (0.30,0.30)，滞回期内应维持旧目标
+        st2 = state(units=[], minimap=self._mm([[0.30, 0.30]]), t=100.5)
+        a2 = decide(st2, cd)
+        self.assertTrue(a2["reason"].startswith("follow_ally_minimap"))
+        self.assertIn("hold", a2["reason"])
+        # 帧3（2s 后）：滞回期过，切到新目标
+        st3 = state(units=[], minimap=self._mm([[0.30, 0.30]]), t=102.5)
+        a3 = decide(st3, cd)
+        self.assertNotIn("hold", a3["reason"])
+
+    def test_no_hold_for_chase(self):
+        """追击敌人不滞回（避免追丢）。"""
+        cd = fresh_cd()
+        st1 = state(units=[enemy(0.85, 0.50)], t=100.0)  # 0.35 屏宽，钩子范围外
+        a1 = decide(st1, cd)
+        self.assertEqual(a1["reason"], "chase_enemy")
+        st2 = state(units=[enemy(0.80, 0.50)], t=100.5)  # 0.30 屏宽，仍钩子范围外
+        a2 = decide(st2, cd)
+        self.assertEqual(a2["reason"], "chase_enemy")
+        self.assertNotIn("hold", a2["reason"])
+
+
+class TestOpeningProtect(unittest.TestCase):
+    """v2.7 开局保护：对局确认 15 秒内只朝发育路，不支援/不跟随（防乱转）。"""
+
+    def test_opening_goes_lane(self):
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        cd["match_start_t"] = 100.0
+        # 开局 5 秒：即使有红点也不支援
+        st = state(units=[], minimap=mm_found(red=[[0.6, 0.6]], blue=[[0.7, 0.8]]), t=105.0)
+        act = decide(st, cd)
+        self.assertEqual(act["reason"], "lane_develop")
+
+    def test_after_opening_supports(self):
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        cd["match_start_t"] = 100.0
+        st = state(units=[], minimap=mm_found(red=[[0.6, 0.6]], blue=[[0.7, 0.8]]), t=120.0)
+        act = decide(st, cd)
+        self.assertTrue(act["reason"].startswith("follow_ally_minimap") or
+                        act["reason"].startswith("support_red_centroid") or
+                        act["reason"].startswith("lane_develop"))
 
 
 if __name__ == "__main__":
