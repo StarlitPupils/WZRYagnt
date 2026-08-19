@@ -157,6 +157,9 @@ def self_hp_mp(frame):
     # 排除 HUD 区误检：自己英雄镜头跟随一般在画面中部，血条 y>=250
     # （右上角头像/技能图标/金币动画的绿色元素 y<250）
     greens = [b for b in greens if b["y"] >= 250]
+    # v3.0: 血条 y<=550（自己英雄在画面中央，血条不会低于 550；
+    # 底部按钮区(战队/结算界面)绿色按钮 y 600+ 误检排除）
+    greens = [b for b in greens if b["y"] <= 550]
     if not greens:
         return None, None, None
     # 自己血条 = 最宽的绿条（血条 90-123px，场景绿 <60px）

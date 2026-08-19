@@ -757,15 +757,27 @@ def main():
                 tracker = make_tracker(frame)
             mm = tracker.update(frame)
             if not mm["found"]:
-                confirm_streak = 0
-                confirmed = False
-                print(f"[{datetime.now():%H:%M:%S}] 对局确认中（小地图暂未定位）...")
+                # v3.0: 已确认过则保持（画面暂时抖动不重置）；
+                # 未确认过则继续等待
+                if not confirmed:
+                    confirm_streak = 0
+                    print(f"[{datetime.now():%H:%M:%S}] 对局确认中（小地图暂未定位）...")
                 continue
             confirm_streak += 1
             if confirm_streak < CONFIRM_FRAMES:
                 confirmed = False
                 print(f"[{datetime.now():%H:%M:%S}] 对局确认中 {confirm_streak}/{CONFIRM_FRAMES} ...")
                 continue
+            # v3.0 绿条铁证：首次确认要求满血绿条（>0.5 = 条宽>57px）——
+            # 对局在泉水出生必满血；主页/结算误检绿条仅 26-29px 被排除；
+            # 已确认后不再检查（阵亡/残血时无满血条但仍在对局中）
+            if not confirmed:
+                from wzry.vision.self_bars import self_hp_mp
+                _hp, _mp, _pos = self_hp_mp(frame)
+                if _hp is None or _hp < 0.5:
+                    confirm_streak = 0
+                    print(f"[{datetime.now():%H:%M:%S}] 对局确认中（无满血绿条，非对局画面）...")
+                    continue
             confirmed = True
             # v2.7 开局保护计时（对局确认时刻）
             if not cooldowns.get("match_start_t"):

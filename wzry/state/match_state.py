@@ -92,6 +92,11 @@ class MatchStateMachine:
         in_match = dark and green > self.green_thr and blue < self.blue_max
 
         if in_match:
+            # v3.0: POST_MATCH 状态锁定（结算界面绿色元素抖动不得拉回对局）
+            if self.phase == MatchPhase.POST_MATCH:
+                if self._post_since and time.time() - self._post_since > self.post_hold_s:
+                    self.phase = MatchPhase.WAITING
+                return self.phase
             self._in_match_streak += 1
             self._out_match_streak = 0
             if self._in_match_streak >= self.hold_frames:
