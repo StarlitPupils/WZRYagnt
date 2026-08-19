@@ -57,9 +57,20 @@ def load_cutouts(cutout_dir: Path):
     return pool
 
 
-def paste(front, back, x, y, size):
-    """把抠图贴到背景 (x, y) 处，缩放为 size。支持 alpha 通道。"""
+def paste(front, back, x, y, size, angle=0.0):
+    """把抠图贴到背景 (x, y) 处，缩放为 size，旋转 angle 度。支持 alpha 通道。
+
+    v4.0: 随机旋转增强（真实小地图英雄标记箭头朝向随机，
+    不旋转训练会导致模型只认单一朝向）。
+    """
     f = cv2.resize(front, (size, size), interpolation=cv2.INTER_AREA)
+    if abs(angle) > 1.0 and f.ndim == 3 and f.shape[2] == 4:
+        # 旋转（保持透明背景）
+        M = cv2.getRotationMatrix2D((size / 2, size / 2), angle, 1.0)
+        f = cv2.warpAffine(f, M, (size, size),
+                           flags=cv2.INTER_LINEAR,
+                           borderMode=cv2.BORDER_CONSTANT,
+                           borderValue=(0, 0, 0, 0))
     h, w = back.shape[:2]
     x0, y0 = int(x), int(y)
     x1, y1 = min(w, x0 + size), min(h, y0 + size)
@@ -98,7 +109,10 @@ def synthesize_one(bg, pool, rng, per_img):
             continue
         x = rng.uniform(0, w - size)
         y = rng.uniform(0, h - size)
-        paste(cut, img, x, y, size)
+        # v4.0: 随机旋转（英雄标记箭头朝向随机；塔/野怪也旋转无害）
+        angle = rng.uniform(0, 360) if cls in ("mm_self", "mm_ally", "mm_enemy") \
+            else rng.choice([0, 90, 180, 270])
+        paste(cut, img, x, y, size, angle)
         cx = (x + size / 2) / w
         cy = (y + size / 2) / h
         bw = size / w

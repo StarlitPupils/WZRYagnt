@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from wzry.vision.detector import YoloDetector  # noqa: E402
-from wzry.vision.mm_yolo import MMYoloDetector  # noqa: E402
+from wzry.vision.mm_hybrid import MMHybridDetector  # noqa: E402
 from wzry.vision.self_bars import self_hp_mp  # noqa: E402
 
 FULL_COLORS = {
@@ -147,8 +147,8 @@ def main():
     full_det = YoloDetector(str(full_weights or ROOT / "runs" / "detect"
                                 / "zhongkui_11cls" / "weights" / "best.pt"),
                             conf=0.25)
-    mm_det = MMYoloDetector(str(ROOT / "runs" / "mm_detect" / "mm_v5"
-                                / "weights" / "best.pt"))
+    mm_det = MMHybridDetector(str(ROOT / "runs" / "mm_detect" / "mm_v6"
+                                  / "weights" / "best.pt"))
     for p in paths:
         annotate(Path(p), full_det, mm_det)
 
