@@ -37,6 +37,11 @@ EXCLUDE_Y_BOTTOM = 660
 HERO_REGION = (500, 300, 800, 550)
 MIN_HERO_AREA = 300
 
+# v2.13 血条标定（1280x720）：头顶血条满条宽 ~115px（标注帧 90-123 中位）
+FULL_BAR_W = 115.0
+# 血条中心到英雄位置垂直距离（血条在头顶上方）
+HERO_BAR_GAP = 55
+
 
 def _find_bars(frame, hue_cond, label):
     """全画面找指定颜色的高亮细横条。"""
@@ -98,76 +103,80 @@ def detect_all_bars(frame):
     return result
 
 
-def _find_self_hero(frame):
-    """中央区域找自己英雄（高饱和大块），返回 (cx, cy) 或 None。"""
-    x0, y0, x1, y1 = HERO_REGION
-    roi = frame[y0:y1, x0:x1]
-    if roi.size == 0:
-        return None
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    sat = (hsv[..., 1] > 80).astype(np.uint8)
-    n, lab, st, cent = cv2.connectedComponentsWithStats(sat, 8)
-    best = None
-    for i in range(1, n):
-        area = st[i, cv2.CC_STAT_AREA]
-        if area >= MIN_HERO_AREA and (best is None or area > best[0]):
-            best = (area, int(cent[i][0]) + x0, int(cent[i][1]) + y0)
-    return (best[1], best[2]) if best else None
-
-
 def _find_bar(head_roi, hue_cond):
-    """在头顶区域找指定色相的横条，返回 (ratio, 条长, 区域宽)。"""
+    """在头顶区域找指定色相的横条，返回 (ratio, 条长, 区域宽)。
+
+    v2.13：改用连通域找最长水平条（逐行 run 对血条渐变/缺口不鲁棒）。
+    """
     if head_roi is None or head_roi.size == 0:
         return None, 0, 0
     hsv = cv2.cvtColor(head_roi, cv2.COLOR_BGR2HSV)
     H, S, V = hsv[..., 0].astype(int), hsv[..., 1].astype(int), hsv[..., 2].astype(int)
-    mask = hue_cond(H, S, V)
-    best_len = 0
-    for ry in range(mask.shape[0]):
-        row = mask[ry]
-        run = 0
-        for x in range(row.shape[0]):
-            if row[x]:
-                run += 1
-                best_len = max(best_len, run)
-            else:
-                run = 0
-    if best_len > 0:
-        return best_len / max(1, mask.shape[1]), best_len, mask.shape[1]
-    return None, 0, mask.shape[1]
+    mask = (hue_cond(H, S, V)).astype(np.uint8) * 255
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (11, 1))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)
+    n, lab, st, cent = cv2.connectedComponentsWithStats(mask, 8)
+    best_w, best_x, best_y = 0, 0, 0
+    for i in range(1, n):
+        w_, h_ = st[i, cv2.CC_STAT_WIDTH], st[i, cv2.CC_STAT_HEIGHT]
+        if h_ > 14 or w_ < 12:  # 横条：高 <=14，宽 >=12
+            continue
+        if w_ > best_w:
+            best_w = int(w_)
+            best_x, best_y = int(cent[i][0]), int(cent[i][1])
+    if best_w > 0:
+        return best_w / max(1, mask.shape[1]), best_w, mask.shape[1], (best_x, best_y)
+    return None, 0, mask.shape[1], None
 
 
 def self_hp_mp(frame):
     """检测自己英雄 HP/MP（头顶绿条 + 蓝条）。
 
     返回 (hp_ratio, mp_ratio, hero_pos) 或 (None, None, None)。
+
+    v2.13 重构（血条驱动）：
+      - 旧版用"中央高饱和大块"定位英雄，场景（水域/草丛/金币提示）常误判
+        → 血条位置全错，HP/MP 交替缺失
+      - 新版：全画面绿条中**最宽的** = 自己血条（队友蓝/敌人红/场景绿短条）
+        → HP = 条宽 / 满条宽(115px)；MP = 绿条正下方蓝条
+      - 修复旧 ratio 用区域宽(200px)作分母导致满血只显示 0.55 的低估 bug
     """
-    hero = _find_self_hero(frame)
-    if hero is None:
-        return None, None, None
-    cx, cy = hero
     h, w = frame.shape[:2]
-    y0 = max(0, cy - 160)
-    y1 = max(0, cy - 100)
-    x0 = max(0, cx - 100)
-    x1 = min(w, cx + 100)
-    if y1 <= y0:
-        return None, None, hero
-    head = frame[y0:y1, x0:x1]
 
     def is_green(H, S, V):
-        return (H >= 35) & (H <= 90) & (S > 60) & (V > 60)
+        return (H >= 35) & (H <= 90) & (S > 50)
 
     def is_blue(H, S, V):
         return (H >= 90) & (H <= 135) & (S > 60) & (V > 60)
 
-    hp, hp_len, _ = _find_bar(head, is_green)
-    mp, mp_len, _ = _find_bar(head, is_blue)
-    if hp_len < 25:
+    greens = _find_bars(frame, is_green, "self")
+    if not greens:
+        return None, None, None
+    # 排除小地图方形区域 (x<240, y<240) 里的绿点/绿圈
+    greens = [b for b in greens if not (b["x"] < 240 and b["y"] < 240)]
+    # 排除 HUD 区误检：自己英雄镜头跟随一般在画面中部，血条 y>=250
+    # （右上角头像/技能图标/金币动画的绿色元素 y<250）
+    greens = [b for b in greens if b["y"] >= 250]
+    if not greens:
+        return None, None, None
+    # 自己血条 = 最宽的绿条（血条 90-123px，场景绿 <60px）
+    best = max(greens, key=lambda b: b["w"])
+    bx, by, bw = best["x"], best["y"], best["w"]
+    hp = min(1.0, bw / FULL_BAR_W)
+    hero_pos = (bx, by + HERO_BAR_GAP)
+
+    # MP：绿条正下方 3-25px，同 x ±45px
+    mp = None
+    y0 = max(0, by + 3)
+    y1 = min(h, by + 25)
+    if y1 > y0:
+        sub = frame[y0:y1, max(0, bx - 45):min(w, bx + 45)]
+        mp, mp_len, _w, _c = _find_bar(sub, is_blue)
+        if mp is not None and mp_len < 20:
+            mp = None
+    if hp is not None and bw < 25:
         hp = None
-    if mp_len < 25:
-        mp = None
-    return hp, mp, hero
+    return hp, mp, hero_pos
 
 
 # 兼容旧接口

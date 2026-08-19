@@ -60,6 +60,7 @@ FOUNTAIN_DIR_RED = (0.88, 0.12)
 LOW_HP_FRAC = 0.20
 DANGER_FRAC = 0.50            # 身边有危险：敌方英雄/兵 < 0.5 屏宽
 RECALL_THROTTLE_S = 20.0      # 回城节流（避免反复点）
+RECALL_ACTIVE_S = 8.0         # v2.13 回城读条保护：回城后 8s 内不执行其他动作（防打断）
 # 塔规避：屏幕存在敌方塔且无我方小兵时，移动方向朝塔则偏转远离
 TURRET_SAFE_FRAC = 0.55       # 塔在屏幕内时与移动目标方向冲突判定阈值
 TURRET_THREAT_FRAC = 0.45     # 塔威胁距离：塔中心距屏幕中心 < 0.45 屏宽才算威胁
@@ -68,7 +69,7 @@ ATTACK_THROTTLE_S = 1.0       # 普攻节流（攻击间隔）
 MELEE_FRAC = 0.20             # 贴身距离：敌人/兵 < 0.20 屏宽且技能冷却 → 普攻
 # ---- v2.5（用户示范局讲解新增规则）----
 HOOK_BLOCK_FRAC = 0.05        # 钩子"粗直线"半宽：路径两侧各 0.05 屏宽内有小兵/野怪 → 不钩（会被挡）
-RESTORE_THROTTLE_S = 10.0     # 恢复键节流
+RESTORE_THROTTLE_S = 60.0     # v2.13 恢复键节流 60s（匹配恢复按钮 CD，原来 10s 反复浪费）
 LOW_RESOURCE_FRAC = 0.80      # HP 或 MP < 80% 且安全 → 按恢复键（用户规则）
 CHASE_BREAK_FRAC = 0.50       # 追击中断：HP < 50% 时停止追击（用户规则：血量降半停止追击撤退）
 ALLY_TOWER_RECALL_FRAC = 0.35  # 残血回城：自家塔中心 < 0.35 屏宽才安全回城（塔下回城）
@@ -189,6 +190,21 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
 
     def ready(key, thr):
         return now - float(cooldowns.get(key, 0.0)) > thr
+
+    # ---- v2.13 回城读条保护：回城后 RECALL_ACTIVE_S 内不执行其他动作 ----
+    # （修复：恢复键/移动在回城读条中执行 -> 回城被打断，血一直回不满）
+    # 例外：敌人/红条近身（危险）时中断回城，走正常决策（逃跑/反击）
+    if now - float(cooldowns.get("recall_t", 0.0)) < RECALL_ACTIVE_S:
+        ne = nearest(enemies)
+        danger = ne is not None and dist_width(ne[0], ne[1]) < DANGER_FRAC
+        if not danger and enemy_bars:
+            for b in enemy_bars:
+                bd = math.hypot(b[0] / w - 0.5, (b[1] / h - 0.5) * aspect)
+                if bd < DANGER_FRAC:
+                    danger = True
+                    break
+        if not danger:
+            return {"type": "none", "reason": "recall_in_progress"}
 
     # ---- 0) 勾中连招：二技能释放后窗口内，敌人被"拉近" = 勾到了 ----
     hook_pending = float(cooldowns.get("hook_pending", 0.0))
@@ -341,21 +357,14 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 "duration_ms": MOVE_DURATION_MS, "reason": reason}
     target = None
     reason = None
-    # ---- v2.12 敌人红条追击：YOLO 未检出敌人但红条可见 -> 朝红条方向移动 ----
-    if not enemies and enemy_bars:
-        # 红条（屏幕像素）-> 归一化坐标
-        nearest_bar = min(enemy_bars, key=lambda b: math.hypot(
-            b[0] / w - 0.5, (b[1] / h - 0.5) * (h / w)))
-        bx, by = nearest_bar[0] / w, nearest_bar[1] / h
-        if 0.0 <= bx <= 1.0 and 0.0 <= by <= 1.0:
-            target = (bx, by)
-            reason = "chase_enemy_bar"
     if enemies:
         ne = nearest(enemies)
         target = (ne[0], ne[1])
         reason = "chase_enemy"
     else:
         # v2.12 敌人红条追击（先于小地图决策）：可见红条 -> 朝红条移动
+        # v2.13 滞回：红条短暂消失(<=1.5s)不丢目标，避免 chase/follow 来回跳
+        bar_hold = now - float(cooldowns.get("bar_chase_t", 0.0)) < 1.5
         if enemy_bars:
             nearest_bar = min(enemy_bars, key=lambda b: math.hypot(
                 b[0] / w - 0.5, (b[1] / h - 0.5) * (h / w)))
@@ -363,6 +372,11 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             if 0.0 <= bx <= 1.0 and 0.0 <= by <= 1.0:
                 target = (bx, by)
                 reason = "chase_enemy_bar"
+                cooldowns["bar_chase_t"] = now
+                cooldowns["bar_target"] = (bx, by)
+        elif bar_hold and cooldowns.get("bar_target"):
+            target = tuple(cooldowns["bar_target"])
+            reason = "chase_enemy_bar"
         if target is None:
             # 移动决策（用户规则：通过小地图观察敌我位置）：
             #   1) 跟随队友：屏幕 ally_hero 优先；否则小地图蓝点中离发育路最近的（射手优先）

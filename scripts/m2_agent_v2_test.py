@@ -569,7 +569,7 @@ class TestOpeningProtect(unittest.TestCase):
 
 
 class TestDecisionV2(unittest.TestCase):
-    """v2.12 决策层升级：敌人红条追击 + MP 管理。"""
+    """v2.12-2.13 决策层升级：敌人红条追击 + MP 管理 + 回城保护 + 恢复节流。"""
 
     def _extra_state(self, enemy_bars=None, mp=1.0, hero_pos=None):
         st = state(units=[], minimap=mm_found())
@@ -621,6 +621,66 @@ class TestDecisionV2(unittest.TestCase):
         self.assertTrue(act["reason"].startswith("follow_ally_minimap") or
                         act["reason"].startswith("support_red_centroid") or
                         act["reason"].startswith("lane_develop"))
+
+    # ---------- v2.13：回城读条保护 / 恢复节流 60s / 红条滞回 ----------
+
+    def test_recall_in_progress_blocks_actions(self):
+        """回城后 8s 内：不执行任何动作（恢复键/移动不得打断读条）。"""
+        cd = fresh_cd()
+        cd["recall_t"] = T - 4.0   # 4 秒前开始回城
+        st = self._extra_state(enemy_bars=[])  # 无危险
+        st.setdefault("ui", {})["hp"] = 0.5    # 低血，但回城中不应按恢复键
+        st.setdefault("ui", {})["mp"] = 0.5
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act["reason"]), ("none", "recall_in_progress"))
+
+    def test_recall_interrupted_by_enemy_near(self):
+        """回城读条中敌人近身 -> 中断回城，走正常决策（追击/技能）。"""
+        cd = fresh_cd()
+        cd["recall_t"] = T - 4.0
+        st = state(units=[enemy(0.52, 0.50)])
+        st["extra"] = {}
+        act = decide(st, cd)
+        self.assertNotEqual(act.get("reason"), "recall_in_progress")
+        self.assertIn(act["type"], ("skill", "move", "attack", "none"))
+
+    def test_restore_throttle_60s(self):
+        """恢复键节流 60s：10 秒前按过 -> 低资源也不按恢复。"""
+        cd = fresh_cd()
+        cd["restore_t"] = T - 10.0
+        st = self._extra_state(mp=0.5)
+        st.setdefault("ui", {})["hp"] = 0.9
+        act = decide(st, cd)
+        self.assertNotEqual(act["type"], "restore")
+
+    def test_restore_ready_after_60s(self):
+        """60 秒后节流到期 -> 低资源安全时按恢复键。"""
+        cd = fresh_cd()
+        cd["restore_t"] = T - 61.0
+        st = self._extra_state(mp=0.5)
+        st.setdefault("ui", {})["hp"] = 0.9
+        act = decide(st, cd)
+        self.assertEqual((act["type"], act["reason"]), ("restore", "low_resource_safe_restore"))
+
+    def test_chase_enemy_bar_hold(self):
+        """红条短暂消失(<=1.5s) -> 沿用最后红条位置继续追击，不切 follow。"""
+        cd = fresh_cd()
+        cd["bar_chase_t"] = T - 1.0
+        cd["bar_target"] = (0.78, 0.42)
+        st = self._extra_state(enemy_bars=[])   # 红条当前不可见
+        act = decide(st, cd)
+        self.assertEqual(act["reason"], "chase_enemy_bar")
+
+    def test_chase_enemy_bar_hold_expired(self):
+        """红条消失超过 1.5s -> 放弃追击，回落到小地图决策。"""
+        cd = fresh_cd()
+        cd["bar_chase_t"] = T - 3.0
+        cd["bar_target"] = (0.78, 0.42)
+        cd["camp"] = "blue"
+        cd["match_start_t"] = 0.0
+        st = self._extra_state(enemy_bars=[])
+        act = decide(st, cd)
+        self.assertNotEqual(act["reason"], "chase_enemy_bar")
 
 
 if __name__ == "__main__":

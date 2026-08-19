@@ -60,8 +60,19 @@ class MatchRecorder:
         """写入一条 GameState（dict）。"""
         if not self.active:
             return
-        self._states_fp.write(json.dumps(state_dict, ensure_ascii=False) + "\n")
+        self._states_fp.write(json.dumps(state_dict, ensure_ascii=False,
+                                         default=self._json_default) + "\n")
         self._n_states += 1
+
+    @staticmethod
+    def _json_default(o):
+        """numpy 标量/数组 -> 原生类型（检测/血条等字段常带 numpy intc/float32）。"""
+        import numpy as np
+        if isinstance(o, np.generic):
+            return o.item()
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        raise TypeError(f'Object of type {o.__class__.__name__} is not JSON serializable')
 
     def on_frame(self, frame):
         """按 frame_every_s 节流保存关键帧 PNG。"""
@@ -80,7 +91,8 @@ class MatchRecorder:
         """写入一条动作事件（与执行器事件流同构）。"""
         if not self.active:
             return
-        self._actions_fp.write(json.dumps(act_dict, ensure_ascii=False) + "\n")
+        self._actions_fp.write(json.dumps(act_dict, ensure_ascii=False,
+                                          default=self._json_default) + "\n")
 
     def _write_manifest(self, extra=None):
         if not self.session_dir:
