@@ -522,6 +522,45 @@ def update_cooldowns(action: dict, cooldowns: dict, now: float):
             update_cooldowns(sub, cooldowns, now)
 
 
+def _async_result_detect(frame, reward):
+    """v3.0 对局结束：modlens 识别结算界面胜负 -> 反馈层计分（后台线程）。
+
+    仅对局结束（POST_MATCH）触发一次；失败/超时静默跳过。
+    """
+    import threading as _th
+
+    def worker(fr):
+        try:
+            import subprocess as _sp
+            import sys as _sys
+            import cv2 as _cv2
+            tmp = ROOT / "temp" / "result_live.png"
+            _cv2.imwrite(str(tmp), fr)
+            prompt = ("这是王者荣耀对局结算界面。请判断本局胜负："
+                      "如果显示胜利(金色胜利大字)回答 victory；"
+                      "如果显示失败回答 defeat；无法判断回答 unknown。"
+                      "只输出一个词。")
+            r = _sp.run(
+                [_sys.executable, "-X", "utf8",
+                 str(ROOT / "scripts" / "train" / "modlens_ask.py"),
+                 str(tmp), prompt],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=90)
+            txt = (r.stdout or "").strip().lower()
+            if "victory" in txt or "胜利" in txt:
+                sc = reward.on_event("victory")
+                print(f"[{datetime.now():%H:%M:%S}] [反馈] 事件 victory {sc:+.0f} 分"
+                      f"（总分 {reward.total:.0f}）")
+            elif "defeat" in txt or "失败" in txt:
+                sc = reward.on_event("defeat")
+                print(f"[{datetime.now():%H:%M:%S}] [反馈] 事件 defeat {sc:+.0f} 分"
+                      f"（总分 {reward.total:.0f}）")
+        except Exception:
+            pass
+
+    _th.Thread(target=worker, args=(frame.copy(),), daemon=True).start()
+
+
 def _rec_hook_measure(cooldowns: dict, state_dict: dict, action: dict, hit: bool):
     """记录钩子释放距离与命中结果（自动标定二技能范围用，写入 data/measure_hook.jsonl）。"""
     try:
@@ -650,6 +689,11 @@ def main():
         print("动作模式: 仅观察（默认 --no-action，不注入任何触摸；加 --action 才执行）")
 
     recorder = MatchRecorder(base_dir=ROOT / "data" / "matches")
+    # v3.0 理解层行为标签 + 反馈层奖惩
+    from wzry.understanding.behavior import BehaviorTagger
+    from wzry.feedback.reward import RewardSystem
+    tagger = BehaviorTagger()
+    reward = RewardSystem()
     cooldowns = {"skill1_t": 0.0, "skill2_t": 0.0, "skill3_t": 0.0,
                  "summoner_t": 0.0, "recall_t": 0.0, "hp_t": 0.0,
                  "restore_t": 0.0, "attack_t": 0.0,
@@ -672,6 +716,7 @@ def main():
     last_log = 0.0
     last_sig = ("none", None)
     frame_id = 0
+    prev_phase = None  # v3.0 状态转换跟踪（IN_MATCH->POST_MATCH 触发胜负事件）
     n_frames = 0
     n_ticks = 0
     n_actions = 0
@@ -693,6 +738,10 @@ def main():
             phase = sm.update(frame)
             now = time.time()
             if phase != MatchPhase.IN_MATCH:
+                # v3.0 对局结束（IN_MATCH -> POST_MATCH）：识别胜负 -> 反馈层计分
+                if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
+                    _async_result_detect(frame, reward)
+                prev_phase = phase
                 confirm_streak = 0
                 confirmed = False
                 if recorder.active:
@@ -836,6 +885,19 @@ def main():
                 print(f"[{datetime.now():%H:%M:%S}] [决策] {format_decision(action)}")
                 last_sig = sig
 
+            # ---- v3.0 理解层：行为标签 + 反馈层奖惩 ----
+            beh = tagger.update(state_dict, cooldowns, action, now)
+            state_dict["behavior"] = beh
+            if beh.get("event"):
+                sc = reward.on_event(beh["event"])
+                if sc:
+                    print(f"[{datetime.now():%H:%M:%S}] [反馈] 事件 {beh['event']} "
+                          f"{sc:+.0f} 分（总分 {reward.total:.0f}）")
+            if beh.get("dead"):
+                # 阵亡：等待泉水复活，不做任何操作（用户规则）
+                action = {"type": "none", "reason": "dead_waiting"}
+                sig = (action.get("type"), action.get("id"))
+
             # ---- 撞墙感知（v2.6）：移动中自己位置不动 -> 绕行 ----
             if action.get("type") == "move":
                 # v2.8：己方位置 = 小地图绿色点（用户语义：绿圈=自己）
@@ -900,7 +962,8 @@ def main():
                 mm_txt = (f"小地图 蓝{len(mm['dots']['blue'])}/红{len(mm['dots']['red'])} "
                           f"({tracker.last_ms:.0f}ms)") if mm["found"] else "小地图 未找到"
                 print(f"[{datetime.now():%H:%M:%S}] 检测 {det.last_infer_ms:5.0f}ms | "
-                      f"{objs} | {mm_txt} | 决策: {format_decision(action)}")
+                      f"{objs} | {mm_txt} | 行为: {beh.get('label', '?')} "
+                      f"| 总分: {reward.total:.0f} | 决策: {format_decision(action)}")
             if args.show:
                 import cv2
                 vis = frame.copy()
