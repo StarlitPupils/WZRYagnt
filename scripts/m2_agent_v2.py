@@ -364,8 +364,11 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     else:
         # v2.12 敌人红条追击（先于小地图决策）：可见红条 -> 朝红条移动
         # v2.13 滞回：红条短暂消失(<=1.5s)不丢目标，避免 chase/follow 来回跳
+        # v2.14 可信度：小地图红点存在才信红条（蓝0/红0 时红条=场景红元素误检）
+        mm0 = state_dict.get("minimap") or {}
+        mm_red0 = (mm0.get("dots") or {}).get("red") or [] if mm0.get("found") else []
         bar_hold = now - float(cooldowns.get("bar_chase_t", 0.0)) < 1.5
-        if enemy_bars:
+        if enemy_bars and mm_red0:
             nearest_bar = min(enemy_bars, key=lambda b: math.hypot(
                 b[0] / w - 0.5, (b[1] / h - 0.5) * (h / w)))
             bx, by = nearest_bar[0] / w, nearest_bar[1] / h
@@ -374,7 +377,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 reason = "chase_enemy_bar"
                 cooldowns["bar_chase_t"] = now
                 cooldowns["bar_target"] = (bx, by)
-        elif bar_hold and cooldowns.get("bar_target"):
+        elif bar_hold and cooldowns.get("bar_target") and mm_red0:
             target = tuple(cooldowns["bar_target"])
             reason = "chase_enemy_bar"
         if target is None:

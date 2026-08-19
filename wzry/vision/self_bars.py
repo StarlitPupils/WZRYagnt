@@ -28,9 +28,9 @@ BRIGHT_V = 140          # 血条高亮
 BAR_W_MIN, BAR_W_MAX = 25, 150
 BAR_H_MAX = 10
 BAR_AREA_MIN = 40
-# HUD 排除区（右侧 UI、顶部、底部）
+# HUD 排除区（右侧 UI、顶部 HUD、底部技能栏）
 EXCLUDE_X = 1230
-EXCLUDE_Y_TOP = 60
+EXCLUDE_Y_TOP = 240    # v2.13: 顶部 240px 是小地图(0-232)+头像条，无真实血条（旧 60 误检多）
 EXCLUDE_Y_BOTTOM = 660
 
 # 自己英雄搜索区（中央偏下）

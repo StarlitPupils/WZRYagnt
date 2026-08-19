@@ -571,8 +571,9 @@ class TestOpeningProtect(unittest.TestCase):
 class TestDecisionV2(unittest.TestCase):
     """v2.12-2.13 决策层升级：敌人红条追击 + MP 管理 + 回城保护 + 恢复节流。"""
 
-    def _extra_state(self, enemy_bars=None, mp=1.0, hero_pos=None):
-        st = state(units=[], minimap=mm_found())
+    def _extra_state(self, enemy_bars=None, mp=1.0, hero_pos=None, mm_red=None):
+        # v2.14: 红条追击需要小地图红点存在（场景红元素误检防护），默认给红点
+        st = state(units=[], minimap=mm_found(red=mm_red if mm_red is not None else [[0.6, 0.6]]))
         extra = {}
         if enemy_bars:
             extra["enemy_bars"] = enemy_bars
@@ -583,7 +584,7 @@ class TestDecisionV2(unittest.TestCase):
         return st
 
     def test_chase_enemy_bar_when_no_detection(self):
-        """YOLO 未检出敌人但红条可见 -> 朝红条方向移动。"""
+        """YOLO 未检出敌人但红条可见+小地图红点存在 -> 朝红条方向移动。"""
         cd = fresh_cd()
         # 红条在屏幕右侧 (1000, 300) -> 归一化 (0.78, 0.42)
         st = self._extra_state(enemy_bars=[(1000, 300, 60)])
@@ -592,6 +593,14 @@ class TestDecisionV2(unittest.TestCase):
         self.assertEqual(act["reason"], "chase_enemy_bar")
         # 朝右（theta 接近 0）
         self.assertLess(abs(act["theta"]), 0.5)
+
+    def test_chase_enemy_bar_ignored_without_minimap_red(self):
+        """v2.14: 小地图无红点（蓝0/红0）时红条不可信（场景红元素误检）-> 不追击。"""
+        cd = fresh_cd()
+        cd["camp"] = "blue"
+        st = self._extra_state(enemy_bars=[(1000, 300, 60)], mm_red=[])
+        act = decide(st, cd)
+        self.assertNotEqual(act["reason"], "chase_enemy_bar")
 
     def test_skill_disabled_when_low_mp(self):
         """MP < 20% 时禁用技能（省蓝），只普攻/移动。"""
