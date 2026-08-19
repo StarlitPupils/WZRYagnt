@@ -33,11 +33,15 @@ EVENT_SCORES = {
     "kill": 20,          # 击杀敌方英雄
     "hook": 10,          # 勾到人
     "died": -50,         # 我阵亡了
-    # ---- 待用户补充系数（暂 0）----
-    "tower_kill": 0,     # 推掉防御塔
-    "be_attacked": 0,    # 我被攻击了
-    "be_tower_attacked": 0,  # 我被防御塔攻击了
-    "assist": 0,         # 助攻
+    # ---- v3.2 用户补充系数 ----
+    "be_tower_attacked": -20,  # 我被防御塔攻击了
+    "be_attacked": -3,         # 我被英雄攻击了
+    "tower_kill": 10,          # 推掉防御塔
+    "assist": 15,              # 助攻
+    "recall_interrupted": -10, # 回城被打断
+    "minion_clear": 2,         # 清理兵线（每个小兵）
+    # 支援队友不加分（用户：这是应该做的）
+    "supporting": 0,
 }
 
 # 事件去重窗口（秒）：同一事件在窗口内不重复计分
@@ -45,6 +49,7 @@ EVENT_DEDUP_S = {
     "victory": 60, "defeat": 60, "hook_kill": 3.0, "kill": 3.0,
     "hook": 2.0, "died": 5.0, "tower_kill": 3.0,
     "be_attacked": 1.0, "be_tower_attacked": 1.0, "assist": 3.0,
+    "recall_interrupted": 2.0, "minion_clear": 0.5,
 }
 
 
@@ -65,8 +70,12 @@ class RewardSystem:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def on_event(self, event: str, meta: dict = None, now: float = None) -> float:
-        """触发事件计分。窗口内重复事件去重，返回本次得分（0=未计分）。"""
-        score = float(EVENT_SCORES.get(event, 0.0))
+        """触发事件计分。窗口内重复事件去重，返回本次得分（0=未计分）。
+
+        meta["count"] 支持批量事件（如 minion_clear 一次清 N 只小兵 -> N 倍分）。
+        """
+        count = max(1, int((meta or {}).get("count", 1)))
+        score = float(EVENT_SCORES.get(event, 0.0)) * count
         now = now if now is not None else time.time()
         dedup = EVENT_DEDUP_S.get(event, 1.0)
         if now - self._last_event_t.get(event, -1e9) < dedup:

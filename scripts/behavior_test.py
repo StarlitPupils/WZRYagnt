@@ -103,10 +103,59 @@ class TestBehaviorLabel(unittest.TestCase):
         self.assertEqual(r["event"], "hook_kill")
 
     def test_kill_without_hook(self):
+        """攻击动作中近处敌人消失 -> 击杀。"""
         tg = BehaviorTagger()
-        tg.update(st(enemies=[[0.55, 0.5]]), cd(), {"type": "move"}, now=T)
-        r = tg.update(st(enemies=[]), cd(), {"type": "move"}, now=T + 1.0)
+        tg.update(st(enemies=[[0.55, 0.5]]), cd(), {"type": "skill", "id": 2}, now=T)
+        r = tg.update(st(enemies=[]), cd(), {"type": "skill", "id": 2}, now=T + 1.0)
         self.assertEqual(r["event"], "kill")
+
+    # ---------- v3.2 补充事件 ----------
+
+    def test_assist_when_no_attack(self):
+        """敌人消失但自己无攻击动作 -> 助攻。"""
+        tg = BehaviorTagger()
+        tg.update(st(enemies=[[0.45, 0.5]]), cd(), {"type": "move"}, now=T)
+        r = tg.update(st(enemies=[]), cd(), {"type": "move"}, now=T + 1.0)
+        self.assertEqual(r["event"], "assist")
+
+    def test_be_attacked_event(self):
+        """血量下降 -> 被攻击事件。"""
+        tg = BehaviorTagger()
+        tg.update(st(hp=0.9), cd(), {"type": "move"}, now=T)
+        r = tg.update(st(hp=0.7), cd(), {"type": "move"}, now=T + 0.1)
+        self.assertEqual(r["event"], "be_attacked")
+
+    def test_be_tower_attacked_event(self):
+        """塔可见 + 血量下降 -> 被防御塔攻击事件。"""
+        tg = BehaviorTagger()
+        tg.update(st(hp=0.9, turrets=[[0.6, 0.5]]), cd(), {"type": "move"}, now=T)
+        r = tg.update(st(hp=0.6, turrets=[[0.6, 0.5]]), cd(), {"type": "move"}, now=T + 0.1)
+        self.assertEqual(r["event"], "be_tower_attacked")
+
+    def test_minion_clear_event(self):
+        """近处敌兵消失 -> 清兵事件（带数量）。"""
+        tg = BehaviorTagger()
+        tg.update(st(minions=[[0.55, 0.5], [0.6, 0.5], [0.58, 0.52]]), cd(),
+                  {"type": "skill", "id": 1}, now=T)
+        r = tg.update(st(minions=[[0.6, 0.5]]), cd(), {"type": "skill", "id": 1}, now=T + 0.5)
+        self.assertEqual(r["event"], "minion_clear")
+        self.assertEqual(r["meta"].get("count"), 2)
+
+    def test_recall_interrupted_event(self):
+        """回城读条中被攻击 -> 回城被打断事件。"""
+        tg = BehaviorTagger()
+        c = cd()
+        c["recall_t"] = T - 2.0
+        tg.update(st(hp=0.9), c, {"type": "none"}, now=T)
+        r = tg.update(st(hp=0.5), c, {"type": "none"}, now=T + 0.1)
+        self.assertEqual(r["event"], "recall_interrupted")
+
+    def test_tower_kill_event(self):
+        """近处敌方塔消失 -> 推塔事件。"""
+        tg = BehaviorTagger()
+        tg.update(st(turrets=[[0.55, 0.5]]), cd(), {"type": "move"}, now=T)
+        r = tg.update(st(turrets=[]), cd(), {"type": "move"}, now=T + 1.0)
+        self.assertEqual(r["event"], "tower_kill")
 
 
 class TestRewardSystem(unittest.TestCase):
@@ -117,6 +166,20 @@ class TestRewardSystem(unittest.TestCase):
         self.assertEqual(EVENT_SCORES["died"], -50)
         self.assertEqual(EVENT_SCORES["victory"], 80)
         self.assertEqual(EVENT_SCORES["defeat"], -80)
+        # v3.2 补充系数
+        self.assertEqual(EVENT_SCORES["be_tower_attacked"], -20)
+        self.assertEqual(EVENT_SCORES["be_attacked"], -3)
+        self.assertEqual(EVENT_SCORES["tower_kill"], 10)
+        self.assertEqual(EVENT_SCORES["assist"], 15)
+        self.assertEqual(EVENT_SCORES["recall_interrupted"], -10)
+        self.assertEqual(EVENT_SCORES["minion_clear"], 2)
+        self.assertEqual(EVENT_SCORES["supporting"], 0)
+
+    def test_minion_clear_count_multiplier(self):
+        """清兵 count 倍率：一次清 3 只 -> +6。"""
+        rw = RewardSystem()
+        sc = rw.on_event("minion_clear", meta={"count": 3}, now=100.0)
+        self.assertEqual(sc, 6.0)
 
     def test_accumulate(self):
         rw = RewardSystem()

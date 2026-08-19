@@ -30,6 +30,10 @@ DEAD_CONFIRM_S = 3.0     # 缺失持续秒数 -> 确认阵亡（防复活/画面
 RECALL_ACTIVE_S = 8.0    # 回城读条持续秒数（与决策层一致）
 HOOK_KILL_WINDOW_S = 3.0  # 勾到人后击杀确认窗口（勾杀组合 +30）
 KILL_NEAR_FRAC = 0.35     # 击杀判定：近处敌人（<0.35 屏宽）从视野消失
+ASSIST_NEAR_FRAC = 0.60   # 助攻判定：0.35-0.6 屏宽敌人消失（队友击杀）
+MINION_NEAR_FRAC = 0.50   # 清兵判定：近处敌兵消失
+TOWER_NEAR_FRAC = 0.60    # 推塔判定：近处敌方塔消失
+HP_DROP_FRAC = 0.03       # 被攻击判定：血量下降阈值
 
 
 class BehaviorTagger:
@@ -42,7 +46,10 @@ class BehaviorTagger:
         self._dead_reported = False
         self._last_label = None
         self._last_near_enemies = 0
+        self._last_near_minions = 0
+        self._last_near_turrets = 0
         self._pending_hook = 0.0   # 勾到人时间（延迟确认：3s 内击杀则计 hook_kill）
+        self._recall_interrupted_reported = False
 
     def update(self, state_dict, cooldowns, action, now=None) -> dict:
         """每帧调用。返回 {"label", "event", "dead", ...}。"""
@@ -75,39 +82,67 @@ class BehaviorTagger:
 
         # ---- 勾到人（延迟确认）：本帧 combo 决策 = 勾中拉近 ----
         event = None
+        meta = {}
         if action.get("type") == "combo":
             self._pending_hook = now if not self._pending_hook else self._pending_hook
-        if self._pending_hook:
-            if now - self._pending_hook > HOOK_KILL_WINDOW_S:
-                event = "hook"          # 勾到人但未造成击杀
-                self._pending_hook = 0.0
 
-        # ---- 击杀检测：近处敌方英雄从视野消失（<0.35 屏宽）----
+        # ---- 敌人消失：击杀/助攻/勾杀 ----
         near_now = sum(1 for u in enemies if dist0(u) < KILL_NEAR_FRAC)
-        if (self._last_near_enemies > 0 and near_now < self._last_near_enemies
-                and not dead):
+        assist_now = sum(1 for u in enemies if KILL_NEAR_FRAC <= dist0(u) < ASSIST_NEAR_FRAC)
+        if (self._last_near_enemies > near_now and not dead):
             if self._pending_hook:
                 event = "hook_kill"     # 勾到人并击杀 +30
                 self._pending_hook = 0.0
+            elif action.get("type") in ("skill", "attack", "combo"):
+                event = "kill"          # 自己有攻击动作 -> 击杀 +20
             else:
-                event = "kill"          # 击杀 +20
+                event = "assist"        # 附近敌人消失且自己未输出 -> 助攻 +15
+        elif self._pending_hook and now - self._pending_hook > HOOK_KILL_WINDOW_S:
+            event = "hook"              # 勾到人但未造成击杀
+            self._pending_hook = 0.0
         self._last_near_enemies = near_now
 
-        # ---- 阵亡事件（首次确认时触发一次）----
-        if dead and not self._dead_reported:
-            event = "died"
-            self._dead_reported = True
-            self._pending_hook = 0.0
+        # ---- 清兵：近处敌方小兵消失（每个 +2）----
+        minions_now = sum(1 for u in enemy_minions if dist0(u) < MINION_NEAR_FRAC)
+        cleared = max(0, self._last_near_minions - minions_now)
+        if cleared > 0 and event is None and not dead:
+            event = "minion_clear"
+            meta["count"] = cleared
+        self._last_near_minions = minions_now
+
+        # ---- 推塔：近处敌方塔消失 ----
+        turrets_now = sum(1 for u in turrets if dist0(u) < TOWER_NEAR_FRAC)
+        if self._last_near_turrets > turrets_now and event is None and not dead:
+            event = "tower_kill"
+        self._last_near_turrets = turrets_now
 
         # ---- 被攻击：血量下降 ----
         being_attacked = False
         if hp is not None and self._last_hp is not None:
-            if self._last_hp - hp > 0.03:
+            if self._last_hp - hp > HP_DROP_FRAC:
                 being_attacked = True
         self._last_hp = hp
 
+        # ---- 回城被打断：回城读条中（recalling）被攻击 ----
+        in_recall = now - float(cooldowns.get("recall_t", 0.0)) < RECALL_ACTIVE_S
+        if in_recall and being_attacked and event is None:
+            event = "recall_interrupted"
+            self._recall_interrupted_reported = True
+        if not in_recall:
+            self._recall_interrupted_reported = False
+
         # ---- 被防御塔攻击：塔可见 + 血量下降 ----
         being_tower_attacked = bool(turrets) and being_attacked
+        if being_tower_attacked and event is None and not dead:
+            event = "be_tower_attacked"
+        elif being_attacked and event is None and not dead:
+            event = "be_attacked"
+
+        # ---- 阵亡事件（最高优先级，首次确认时触发一次）----
+        if dead and not self._dead_reported:
+            event = "died"
+            self._dead_reported = True
+            self._pending_hook = 0.0
 
         # ---- 行为标签（优先级从高到低）----
         action_type = action.get("type", "none")
@@ -137,6 +172,6 @@ class BehaviorTagger:
             label = "idle"
         self._last_label = label
 
-        return {"label": label, "event": event, "dead": dead,
+        return {"label": label, "event": event, "meta": meta, "dead": dead,
                 "being_attacked": being_attacked,
                 "being_tower_attacked": being_tower_attacked}
