@@ -15,17 +15,28 @@ sys.path.insert(0, str(ROOT))
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", default="data/mm_dataset/data.yaml")
+    ap.add_argument("--name", default="mm_v1")
+    ap.add_argument("--epochs", type=int, default=60)
+    ap.add_argument("--resume", default=None, help="续训权重路径")
+    args = ap.parse_args()
+
     from ultralytics import YOLO
-    data_yaml = ROOT / "data" / "mm_dataset" / "data.yaml"
+    data_yaml = ROOT / args.data
     if not data_yaml.exists():
         print("缺少", data_yaml, "，请先运行 build_mm_dataset.py")
         return
-    model = YOLO(str(ROOT / "models" / "yolo" / "yolov8n.pt"))
-    model.train(data=str(data_yaml), epochs=60, imgsz=320, batch=16,
-                project=str(ROOT / "runs" / "mm_detect"), name="mm_v1",
+    if args.resume:
+        model = YOLO(args.resume)
+    else:
+        model = YOLO(str(ROOT / "models" / "yolo" / "yolov8n.pt"))
+    model.train(data=str(data_yaml), epochs=args.epochs, imgsz=320, batch=16,
+                project=str(ROOT / "runs" / "mm_detect"), name=args.name,
                 device="0" if __import__("torch").cuda.is_available() else "cpu",
                 workers=0, patience=30, exist_ok=True)
-    print("训练完成: runs/mm_detect/mm_v1/weights/best.pt")
+    print("训练完成: runs/mm_detect/%s/weights/best.pt" % args.name)
 
 
 if __name__ == "__main__":

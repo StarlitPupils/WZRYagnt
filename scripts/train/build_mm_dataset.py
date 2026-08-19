@@ -113,10 +113,14 @@ def main():
     ap.add_argument("--per-img", type=int, default=8)
     ap.add_argument("--imgs", type=int, default=600)
     ap.add_argument("--out", default="data/mm_dataset")
+    ap.add_argument("--bg", default="data/mm_backgrounds_clean",
+                    help="背景目录（默认清洗过的：已抹除元素）")
+    ap.add_argument("--cutouts", default="data/mm_cutouts_clean",
+                    help="抠图目录（默认去背景带 alpha 版）")
     args = ap.parse_args()
 
-    cutout_dir = ROOT / "data" / "mm_cutouts"
-    bg_dir = ROOT / "data" / "mm_backgrounds"
+    cutout_dir = ROOT / args.cutouts
+    bg_dir = ROOT / args.bg
     out_dir = ROOT / args.out
     if not bg_dir.exists():
         print("缺少背景目录 data/mm_backgrounds")
