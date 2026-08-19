@@ -33,7 +33,7 @@ KILL_NEAR_FRAC = 0.35     # 击杀判定：近处敌人（<0.35 屏宽）从视�
 ASSIST_NEAR_FRAC = 0.60   # 助攻判定：0.35-0.6 屏宽敌人消失（队友击杀）
 MINION_NEAR_FRAC = 0.50   # 清兵判定：近处敌兵消失
 TOWER_NEAR_FRAC = 0.60    # 推塔判定：近处敌方塔消失
-HP_DROP_FRAC = 0.03       # 被攻击判定：血量下降阈值
+HP_DROP_FRAC = 0.06       # 被攻击判定：血量下降阈值（v3.2 实测 0.03 噪声误报，提至 0.06）
 
 
 class BehaviorTagger:
