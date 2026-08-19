@@ -44,10 +44,16 @@ def annotate(path, full_det, mm_det):
     vis = img.copy()
     h, w = img.shape[:2]
 
-    # ---- 全屏 11 类 ----
+    # ---- 全屏 11 类（v4.1: 排除画面中央超大框=自己英雄/视角误检）----
     n_full = 0
     for d in full_det.detect(img):
         x1, y1, x2, y2 = (int(v) for v in d.xyxy)
+        bw, bh = x2 - x1, y2 - y1
+        # 中央大框过滤：覆盖画面中央且面积 >45% 的检测 = 自己英雄/大模型误检
+        if (bw * bh) > 0.45 * h * w:
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            if 0.25 * w < cx < 0.75 * w and 0.25 * h < cy < 0.75 * h:
+                continue
         color = FULL_COLORS.get(d.cls, (200, 200, 200))
         cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
         cv2.putText(vis, f"{d.cls} {d.conf:.2f}", (x1, max(0, y1 - 8)),
@@ -119,9 +125,15 @@ def annotate(path, full_det, mm_det):
     else:
         cv2.putText(vis, "NO MINIMAP", (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
 
-    # ---- 信息汇总（左下角）----
-    summary = f"FULL={n_full} | {mm_txt or 'NO MM'} | HP={hp} MP={mp}"
-    cv2.putText(vis, summary, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+    # ---- 信息汇总（底部黑底白字，标注含义清晰）----
+    summary = (f"全屏目标={n_full} | 小地图: 自己{len(mm['dots']['self']) if mm.get('found') else 0} "
+               f"队友{len(mm['dots']['ally']) if mm.get('found') else 0} "
+               f"敌人{len(mm['dots']['enemy']) if mm.get('found') else 0} "
+               f"野怪{len(mm['dots']['monster']) if mm.get('found') else 0} "
+               f"塔{len(mm['towers']['ally']) + len(mm['towers']['enemy']) if mm.get('found') else 0} | "
+               f"自己HP={hp} 蓝={mp}")
+    cv2.rectangle(vis, (0, h - 34), (w, h), (0, 0, 0), -1)
+    cv2.putText(vis, summary, (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                 (0, 255, 255), 2)
 
     out = ROOT / "temp" / f"annot_full_{path.stem}.png"
