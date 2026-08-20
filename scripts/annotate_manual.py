@@ -29,6 +29,38 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+# ---- 中文渲染（OpenCV putText 不支持中文 -> 用 PIL + 微软雅黑）----
+from PIL import Image, ImageDraw, ImageFont  # noqa: E402
+
+_FONT_CACHE = {}
+
+
+def _font(size):
+    if size not in _FONT_CACHE:
+        for fp in (r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\msyhbd.ttc",
+                   r"C:\Windows\Fonts\simhei.ttf", r"C:\Windows\Fonts\simsun.ttc"):
+            if Path(fp).exists():
+                _FONT_CACHE[size] = ImageFont.truetype(fp, size)
+                break
+        else:
+            _FONT_CACHE[size] = None
+    return _FONT_CACHE[size]
+
+
+def put_text_cn(img, text, org, size=16, color=(255, 255, 0)):
+    """在 BGR 图像上绘制中文（PIL 渲染后写回）。"""
+    f = _font(size)
+    if f is None:
+        return
+    x, y = int(org[0]), int(org[1])
+    h, w = img.shape[:2]
+    if x >= w or y >= h:
+        return
+    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    dr = ImageDraw.Draw(pil)
+    dr.text((x, y), text, font=f, fill=(color[2], color[1], color[0]))
+    img[:] = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+
 ROOT = Path(__file__).resolve().parent.parent
 MM = (0, 0, 232, 232)          # 小地图区域（全屏坐标）
 MM_ZOOM = 3
@@ -131,17 +163,18 @@ class ManualAnnotator:
             sx1, sy1 = int(bx1 * scale + ox), int(by1 * scale + oy)
             sx2, sy2 = int(bx2 * scale + ox), int(by2 * scale + oy)
             cv2.rectangle(vis, (sx1, sy1), (sx2, sy2), COLORS.get(c, (200, 200, 200)), 2)
-            cv2.putText(vis, LABELS.get(c, str(c)), (sx1, max(10, sy1 - 6)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS.get(c, (200, 200, 200)), 2)
+            put_text_cn(vis, LABELS.get(c, str(c)), (sx1, max(6, sy1 - 22)),
+                        14, COLORS.get(c, (200, 200, 200)))
         # 拖动中的框
         if self.drag:
             (dx1, dy1), (dx2, dy2) = self.drag
             cv2.rectangle(vis, (dx1, dy1), (dx2, dy2),
                           COLORS.get(self.cls, (200, 200, 200)), 2)
         mode = "小地图(放大x3)" if self.mm_mode else "全屏"
-        title = f"{mode} | 类别: {LABELS.get(self.cls, self.cls)} | {self.paths[self.idx].name}"
-        cv2.putText(vis, title, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (0, 255, 255), 2)
+        put_text_cn(vis, f"{mode} | 类别: {LABELS.get(self.cls, self.cls)}",
+                    (10, 30), 20, (0, 255, 255))
+        put_text_cn(vis, f"{self.paths[self.idx].name} | 框数: {len(self.boxes)}",
+                    (10, 60), 16, (255, 255, 255))
         cv2.imshow("manual-annotator", vis)
         self.vis = vis
 
