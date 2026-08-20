@@ -1,0 +1,13 @@
+path: E:\WZRYagent\scripts\data\mm_user_v7
+train: images/train
+val: images/train
+names:
+  0: mm_self
+  1: mm_ally
+  2: mm_enemy
+  3: mm_ally_tower
+  4: mm_enemy_tower
+  5: mm_monster
+  6: mm_buff
+  7: mm_ally_minion
+  8: mm_enemy_minion

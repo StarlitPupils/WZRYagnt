@@ -29,6 +29,10 @@ class MMHybridDetector:
 
     # ---------- 颜色圈 ----------
     def _color_circles(self, mm):
+        """英雄圈检测（尺寸区分塔/野怪/buff）：
+        英雄圈 22-32px(area 250-700)，塔方块 10-16px(area 60-180)，
+        野怪点 6-10px，buff 图标 12-18px。
+        """
         hsv = cv2.cvtColor(mm, cv2.COLOR_BGR2HSV)
         H, S, V = (hsv[..., 0].astype(int), hsv[..., 1].astype(int),
                    hsv[..., 2].astype(int))
@@ -44,7 +48,9 @@ class MMHybridDetector:
                 w_ = int(st[i, cv2.CC_STAT_WIDTH])
                 h_ = int(st[i, cv2.CC_STAT_HEIGHT])
                 comp = area / max(1.0, w_ * h_)
-                if not (60 <= area <= 500 and comp >= 0.45):
+                # 英雄圈：大尺寸(>=20px 宽) 且近圆
+                if not (w_ >= 20 and h_ >= 20 and area >= 250
+                        and comp >= 0.55):
                     continue
                 cx, cy = int(cent[i][0]), int(cent[i][1])
                 # 排除四角泉水固定标记
@@ -89,4 +95,29 @@ class MMHybridDetector:
             {"n": [round(c[0] / (x1 - x0), 4), round(c[1] / (y1 - y0), 4)],
              "conf": 0.6, "src": "color"}
             for c in circles["red"] if not self._near(c, all_tw, TOWER_RADIUS)]
+        # self：绿圈（大尺寸）颜色验证优先，YOLO self 兜底
+        green = self._color_green(mm)
+        if green:
+            r["dots"]["self"] = [
+                {"n": [round(c[0] / (x1 - x0), 4), round(c[1] / (y1 - y0), 4)],
+                 "conf": 0.7, "src": "green"} for c in green]
         return r
+
+    def _color_green(self, mm):
+        """自己绿圈（大尺寸近圆）检测。"""
+        hsv = cv2.cvtColor(mm, cv2.COLOR_BGR2HSV)
+        H, S, V = (hsv[..., 0].astype(int), hsv[..., 1].astype(int),
+                   hsv[..., 2].astype(int))
+        m = ((H >= 35) & (H <= 90) & (S > 80) & (V > 80)).astype(np.uint8) * 255
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        n, lab, st, cent = cv2.connectedComponentsWithStats(m, 8)
+        out = []
+        for i in range(1, n):
+            area = int(st[i, cv2.CC_STAT_AREA])
+            w_ = int(st[i, cv2.CC_STAT_WIDTH])
+            h_ = int(st[i, cv2.CC_STAT_HEIGHT])
+            comp = area / max(1.0, w_ * h_)
+            if w_ >= 20 and h_ >= 20 and area >= 250 and comp >= 0.55:
+                out.append((int(cent[i][0]), int(cent[i][1])))
+        return out

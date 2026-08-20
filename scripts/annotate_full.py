@@ -32,8 +32,8 @@ FULL_COLORS = {
 }
 MM_COLORS = {"self": (0, 255, 0), "ally": (255, 128, 0), "enemy": (0, 0, 255),
              "monster": (0, 255, 255), "buff": (255, 0, 255)}
-MM_LABELS = {"self": "SELF", "ally": "ALLY", "enemy": "ENEMY",
-             "monster": "MON", "buff": "BUFF"}
+MM_LABELS = {"self": "自己", "ally": "队友", "enemy": "敌人",
+             "monster": "野怪", "buff": "buff"}
 
 
 def annotate(path, full_det, mm_det):
@@ -64,8 +64,9 @@ def annotate(path, full_det, mm_det):
     hp, mp, pos = self_hp_mp(img)
     if pos:
         cv2.circle(vis, pos, 10, (255, 0, 255), 3)
-        cv2.putText(vis, f"SELF HP={hp} MP={mp}", (pos[0] + 15, pos[1]),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+        cv2.putText(vis, f"自己 HP={hp} 蓝={mp}", (min(pos[0] + 15, w - 260),
+                    max(30, pos[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (255, 255, 255), 2)
 
     # ---- 技能状态（校准坐标）----
     try:
@@ -100,7 +101,8 @@ def annotate(path, full_det, mm_det):
                 px = int(ox + d["n"][0] * r2 * 2)
                 py = int(oy + d["n"][1] * r2 * 2)
                 cv2.circle(vis, (px, py), 7, color, -1)
-                cv2.putText(vis, f"{MM_LABELS[grp]} {d['conf']:.2f}", (px + 9, py),
+                cv2.putText(vis, MM_LABELS[grp],
+                            (min(px + 9, w - 60), min(max(12, py), oy + r2 * 2 - 4)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2)
                 cnts.append(grp)
         for side, color in (("ally", (200, 100, 0)), ("enemy", (0, 100, 200))):
