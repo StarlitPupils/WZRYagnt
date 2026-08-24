@@ -121,15 +121,20 @@ class MMDetectorV4:
                 else:
                     res["ally_minion"].append((cx, cy))
                 continue
-            # 英雄圈（sz>=16）: HeroCamp 分类
+            # 英雄圈（sz>=16）: self用绿圈规则, ally/enemy用HeroCamp
             if sz >= 16:
+                g_ = center_frac(cx, cy, sz, 35, 90)
+                # 绿占比高 -> 自己（真值绿 0.18-0.45, 降阈值0.15+唯一化选最高绿）
+                if g_ > 0.15:
+                    res["self"].append((cx, cy, g_))
+                    continue
                 crop = mm[max(0, cy - sz // 2):cy + sz // 2,
                           max(0, cx - sz // 2):cx + sz // 2]
                 if crop.size == 0:
                     continue
                 camp, conf = self._camp(crop)
                 if camp == 0:
-                    res["self"].append((cx, cy))
+                    res["self"].append((cx, cy, g_))
                 elif camp == 1:
                     res["ally"].append((cx, cy))
                 else:
@@ -141,14 +146,15 @@ class MMDetectorV4:
             else:
                 res["ally_tower"].append((cx, cy))
 
-        # 自己唯一化
+        # 自己唯一化：排除四角泉水图标(绿占比高但非自己), 再选绿占比最高
+        if res["self"]:
+            res["self"] = [p for p in res["self"]
+                           if not any(abs(p[0] - c[0]) < 26 and abs(p[1] - c[1]) < 26
+                                      for c in ((12, 12), (mw - 12, 12),
+                                                (12, mh - 12), (mw - 12, mh - 12)))]
         if len(res["self"]) > 1:
-            scored = []
-            for p in res["self"]:
-                crop = mm[max(0, p[1] - 12):p[1] + 12, max(0, p[0] - 12):p[0] + 12]
-                camp, conf = self._camp(crop) if crop.size else (0, 0)
-                scored.append((conf, p))
-            res["self"] = [max(scored, key=lambda x: x[0])[1]]
+            res["self"] = [max(res["self"], key=lambda p: p[2])]
+        res["self"] = [(p[0], p[1]) for p in res["self"]]
 
         def norm(p):
             return [round(p[0] / mw, 4), round(p[1] / mh, 4)]
