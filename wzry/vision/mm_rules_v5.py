@@ -125,6 +125,11 @@ class MMDetectorV5:
 
         for cx, cy, sz in uniq:
             n_px = (cx / mw, cy / mh)
+            # 边缘排除（±0.06 内非固定点 = UI/边角元素，HeroCamp 常误判）
+            if (n_px[0] < 0.06 or n_px[0] > 0.94 or n_px[1] < 0.06 or n_px[1] > 0.94):
+                if not (_match_pt(n_px, RED_TOWER_PTS) or _match_pt(n_px, BLUE_TOWER_PTS)
+                        or _match_pt(n_px, MONSTER_PTS) or _match_pt(n_px, BUFF_PTS)):
+                    continue
             r_ = center_frac(cx, cy, sz, 165, 180) + center_frac(cx, cy, sz, 0, 15)
             y_ = center_frac(cx, cy, sz, 18, 45)
             b_ = center_frac(cx, cy, sz, 70, 135)
@@ -156,7 +161,7 @@ class MMDetectorV5:
                 if crop.size == 0:
                     continue
                 camp, conf = self._camp(crop)
-                if conf >= 0.5:
+                if conf >= 0.65:
                     if camp == 0:
                         res["self"].append((cx, cy))
                     elif camp == 1:
@@ -174,19 +179,15 @@ class MMDetectorV5:
             else:
                 res["ally_minion"].append((cx, cy))
 
-        # 自己唯一化：排除四角泉水区 + HeroCamp 置信最高的保留
+        # 自己唯一化：排除四角泉水区 + 绿占比最高（真值自己绿0.28 vs 队友圈0.08）
         if res["self"]:
             res["self"] = [p for p in res["self"]
                            if not any(abs(p[0] - c[0]) < 26 and abs(p[1] - c[1]) < 26
                                       for c in ((12, 12), (mw - 12, 12),
                                                 (12, mh - 12), (mw - 12, mh - 12)))]
         if len(res["self"]) > 1:
-            scored = []
-            for p in res["self"]:
-                crop = mm[max(0, p[1] - 12):p[1] + 12, max(0, p[0] - 12):p[0] + 12]
-                camp, conf = self._camp(crop) if crop.size else (0, 0)
-                scored.append((conf, p))
-            res["self"] = [max(scored, key=lambda x: x[0])[1]]
+            res["self"] = [max(res["self"],
+                               key=lambda p: center_frac(p[0], p[1], 20, 35, 90))]
 
         # 固定点直接输出（蓝塔/红塔/野怪/buff 位置固定，无候选也输出——塔未被摧毁时）
         for x, y, n in BLUE_TOWER_PTS:
