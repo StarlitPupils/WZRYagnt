@@ -56,7 +56,11 @@ class MMDetectorV4:
                    hsv[..., 2].astype(int))
 
         def corner(px, py):
-            return min(px, mw - px) < CORNER and min(py, mh - py) < CORNER
+            # 只排除四角泉水图标位置（中心 ±12px），不误伤泉水旁的英雄/塔
+            for ccx, ccy in ((12, 12), (mw - 12, 12), (12, mh - 12), (mw - 12, mh - 12)):
+                if abs(px - ccx) <= 12 and abs(py - ccy) <= 12:
+                    return True
+            return False
 
         def comps(mask):
             mask = mask.astype(np.uint8) * 255
