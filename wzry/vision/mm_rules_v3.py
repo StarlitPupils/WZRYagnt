@@ -112,8 +112,8 @@ class MMDetectorV3:
             if corner(cx, cy):
                 continue
             b, r_, y, g = center_colors(cx, cy, sz)
-            r_hi = r_ > 0.22 and r_ >= b * 0.6
-            # 红塔规则（优先，100% 可靠）
+            r_hi = r_ > 0.18 and r_ >= b * 0.5
+            # 红塔规则（优先，可靠）
             if 8 <= sz <= 22 and r_hi and y < 0.1:
                 res["enemy_tower"].append((cx, cy))
                 continue
@@ -139,6 +139,14 @@ class MMDetectorV3:
                 res["ally_tower"].append((cx, cy))
             else:
                 res["ally_minion"].append((cx, cy))
+
+        # 自己唯一化：只保留绿占比最高的候选
+        if len(res["self"]) > 1:
+            scored = []
+            for p in res["self"]:
+                b2, r2, y2, g2 = center_colors(p[0], p[1], 20)
+                scored.append((g2, p))
+            res["self"] = [max(scored, key=lambda x: x[0])[1]]
 
         def norm(p):
             return [round(p[0] / mw, 4), round(p[1] / mh, 4)]
