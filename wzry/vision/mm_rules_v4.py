@@ -105,26 +105,20 @@ class MMDetectorV4:
             r_ = center_frac(cx, cy, sz, 165, 180) + center_frac(cx, cy, sz, 0, 15)
             y_ = center_frac(cx, cy, sz, 18, 45)
             b_ = center_frac(cx, cy, sz, 70, 135)
-            # 黄色优先：野怪点(<=13px)/buff(>=14px)
+            # 黄色优先：野怪点(<=11px)/buff(>=12px)
             if y_ > 0.12:
-                if sz >= 14:
+                if sz >= 12:
                     res["buff"].append((cx, cy))
                 else:
                     res["monster"].append((cx, cy))
                 continue
-            if 8 <= sz <= 22 and r_ > 0.18 and r_ >= b_ * 0.5 and y_ < 0.1:
+            # 红塔规则（优先，sz<=20 排除大圈；队友圈均28不误伤）
+            if 8 <= sz <= 20 and r_ > 0.15 and r_ >= b_ * 0.4 and y_ < 0.1:
                 res["enemy_tower"].append((cx, cy))
                 continue
-            if sz < 11:
-                if r_ > 0.25:
-                    res["enemy_minion"].append((cx, cy))
-                else:
-                    res["ally_minion"].append((cx, cy))
-                continue
-            # 英雄圈（sz>=16）: self用绿圈规则, ally/enemy用HeroCamp
+            # 英雄圈（sz>=16）优先：HeroCamp 分类（组合队友/敌人/自己）
             if sz >= 16:
                 g_ = center_frac(cx, cy, sz, 35, 90)
-                # 绿占比高 -> 自己（真值绿 0.18-0.45, 降阈值0.15+唯一化选最高绿）
                 if g_ > 0.15:
                     res["self"].append((cx, cy, g_))
                     continue
@@ -133,15 +127,30 @@ class MMDetectorV4:
                 if crop.size == 0:
                     continue
                 camp, conf = self._camp(crop)
-                if camp == 0:
-                    res["self"].append((cx, cy, g_))
-                elif camp == 1:
-                    res["ally"].append((cx, cy))
+                # HeroCamp 高置信 -> 英雄圈；低置信 -> 落到塔判定
+                if conf >= 0.5:
+                    if camp == 0:
+                        res["self"].append((cx, cy, g_))
+                    elif camp == 1:
+                        res["ally"].append((cx, cy))
+                    else:
+                        res["enemy"].append((cx, cy))
+                    continue
+                # 低置信：塔判定（红塔规则）
+                if 8 <= sz <= 22 and r_ > 0.18 and r_ >= b_ * 0.5 and y_ < 0.1:
+                    res["enemy_tower"].append((cx, cy))
+                    continue
+                res["ally_tower"].append((cx, cy))
+                continue
+            # sz < 16: 小兵/小塔
+            if sz < 11:
+                if r_ > 0.25:
+                    res["enemy_minion"].append((cx, cy))
                 else:
-                    res["enemy"].append((cx, cy))
+                    res["ally_minion"].append((cx, cy))
                 continue
             # 11-15px: 塔
-            if r_ > 0.2:
+            if r_ > 0.18 and r_ >= b_ * 0.5:
                 res["enemy_tower"].append((cx, cy))
             else:
                 res["ally_tower"].append((cx, cy))
