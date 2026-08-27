@@ -213,7 +213,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         cooldowns["red_stable"] = float(cooldowns.get("red_stable", 0)) + 1
     else:
         cooldowns["red_stable"] = 0
-    if enemies or (len(_mmr_pts0) >= 1 and _d_red0 < 0.15
+    if enemies or enemy_bars or (len(_mmr_pts0) >= 1 and _d_red0 < 0.15
                    and cooldowns.get("red_stable", 0) >= 2):
         _nq0 = nearest(enemies) if enemies else None
         _dq0 = dist_width(_nq0[0], _nq0[1]) if _nq0 else 0.90

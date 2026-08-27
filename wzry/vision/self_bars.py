@@ -248,7 +248,7 @@ def self_hp_mp(frame):
     h, w = frame.shape[:2]
 
     def is_green(H, S, V):
-        return (H >= 35) & (H <= 90) & (S > 50)
+        return (H >= 35) & (H <= 90) & (S > 30) & (V > 45)   # v2.86 放宽(PW帧S/V低)
 
     def is_blue(H, S, V):
         return (H >= 85) & (H <= 140) & (S > 35) & (V > 35)   # v2.80 放宽(PW帧S偏低)
