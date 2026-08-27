@@ -1374,9 +1374,12 @@ def main():
             if now - float(cooldowns.get("hp_t", 0.0)) >= 0.5:
                 cooldowns["hp_t"] = now
                 try:
-                    from wzry.vision.self_bars import self_hp_mp, detect_all_bars, death_banner_px
+                    from wzry.vision.self_bars import self_hp_mp, detect_all_bars, death_banner_px, kill_banner_px
                     # v2.87 死亡横幅铁证 -> ui.death_banner (行为层判死依据)
-                    state_dict.setdefault("ui", {})["death_banner"] = death_banner_px(frame)
+                    # v2.96 击杀播报金条 -> ui.kill_banner (kill/assist 铁证, 旧"消失=击杀"为假事件)
+                    _ui = state_dict.setdefault("ui", {})
+                    _ui["death_banner"] = death_banner_px(frame)
+                    _ui["kill_banner"] = kill_banner_px(frame)
                     hp, mp, hero_pos = self_hp_mp(frame)
                     if hp is not None:
                         state_dict.setdefault("ui", {})["hp"] = hp

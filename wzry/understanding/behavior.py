@@ -29,6 +29,8 @@ DEAD_MISS_FRAMES = 6     # 自己血条连续缺失帧数 -> 疑似阵亡
 DEAD_CONFIRM_S = 3.0     # 缺失持续秒数 -> 确认阵亡（防复活/画面抖动误判）
 DEAD_BANNER_MIN = 2500   # v2.87 死亡横幅暗红px阈值(真死>=2500, 击杀播报<=1800)
 DEAD_BANNER_STREAK = 2   # 横幅连续帧数 -> 铁证死亡(死亡时屏幕有'查看死亡回放'提示)
+KILL_BANNER_MIN = 900    # v2.96 击杀播报金条px阈值(金色'你击败了'横幅)
+KILL_WINDOW_S = 8.0      # 击杀播报窗口: 窗口内敌人消失才算击杀/助攻
 RECALL_ACTIVE_S = 8.0    # 回城读条持续秒数（与决策层一致）
 HOOK_KILL_WINDOW_S = 3.0  # 勾到人后击杀确认窗口（勾杀组合 +30）
 KILL_NEAR_FRAC = 0.35     # 击杀判定：近处敌人（<0.35 屏宽）从视野消失
@@ -48,6 +50,8 @@ class BehaviorTagger:
         self._dead_reported = False
         self._dead_since = None      # v2.87 死亡(横幅铁证)起始时间
         self._banner_streak = 0      # v2.87 死亡横幅连续帧数
+        self._kill_banner_t = None   # v2.96 击杀播报金条时间(窗口内击杀才成立)
+        self._kill_banner_seen = False
         self._last_label = None
         self._last_near_enemies = 0
         self._last_near_minions = 0
@@ -64,6 +68,8 @@ class BehaviorTagger:
         self._dead_reported = False
         self._dead_since = None
         self._banner_streak = 0
+        self._kill_banner_t = None
+        self._kill_banner_seen = False
         self._last_near_enemies = 0
         self._last_near_minions = 0
         self._last_near_turrets = 0
@@ -124,17 +130,28 @@ class BehaviorTagger:
         if action.get("type") == "combo":
             self._pending_hook = now if not self._pending_hook else self._pending_hook
 
-        # ---- 敌人消失：击杀/助攻/勾杀 ----
+        # ---- 敌人消失：击杀/助攻/勾杀 (v2.96 需击杀播报铁证, 旧"消失=击杀"是假事件) ----
+        # 击杀播报金条 >=KILL_BANNER_MIN 记入 _kill_banner_t 窗口 8s; 窗口内敌人消失才算击杀类
+        _kb = int(ui.get("kill_banner") or 0)
+        if _kb >= KILL_BANNER_MIN:
+            self._kill_banner_t = now
+            self._kill_banner_seen = True
+        kill_confirm = (self._kill_banner_t is not None
+                        and now - self._kill_banner_t <= KILL_WINDOW_S)
         near_now = sum(1 for u in enemies if dist0(u) < KILL_NEAR_FRAC)
         assist_now = sum(1 for u in enemies if KILL_NEAR_FRAC <= dist0(u) < ASSIST_NEAR_FRAC)
         if (self._last_near_enemies > near_now and not dead):
-            if self._pending_hook:
-                event = "hook_kill"     # 勾到人并击杀 +30
-                self._pending_hook = 0.0
-            elif action.get("type") in ("skill", "attack", "combo"):
-                event = "kill"          # 自己有攻击动作 -> 击杀 +20
+            if kill_confirm:
+                if self._pending_hook:
+                    event = "hook_kill"     # 勾到人并击杀 +30
+                    self._pending_hook = 0.0
+                elif action.get("type") in ("skill", "attack", "combo"):
+                    event = "kill"          # 自己有攻击动作 -> 击杀 +20
+                else:
+                    event = "assist"        # 附近敌人消失且自己未输出 -> 助攻 +15
+                self._kill_banner_t = None   # 只消费一次
             else:
-                event = "assist"        # 附近敌人消失且自己未输出 -> 助攻 +15
+                event = None                # 无敌方击杀播报=敌人走掉/进草, 非击杀
         elif self._pending_hook and now - self._pending_hook > HOOK_KILL_WINDOW_S:
             event = "hook"              # 勾到人但未造成击杀
             self._pending_hook = 0.0

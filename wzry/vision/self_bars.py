@@ -239,6 +239,21 @@ def find_enemy_bars(frame):
     return None, 0, mask.shape[1], None
 
 
+def kill_banner_px(frame):
+    """v2.96 击杀播报检测: 屏幕顶部中央('你击败了xx'金色横幅, 0-46, 500-790)。
+    金色: H 15-40, S>120, V>140。击杀瞬间横幅出现即可作为 kill/assist 铁证
+    (旧"敌人消失=击杀"是假事件: 敌人进草/走掉也算 -> 战绩0杀却记一堆kill)。"""
+    try:
+        roi = frame[0:46, 500:790]
+        if roi.size == 0:
+            return 0
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        H, S, V = hsv[..., 0].astype(int), hsv[..., 1].astype(int), hsv[..., 2].astype(int)
+        return int(((H >= 15) & (H <= 40) & (S > 120) & (V > 140)).sum())
+    except Exception:
+        return 0
+
+
 def death_banner_px(frame):
     """v2.87 死亡横幅检测: 顶部中央(0-46, 500-790)暗红色像素数。
     真死亡('查看死亡回放'深红横幅)>=2500; 击杀播报/存活时<=1800 -> 阈值2500分离。"""
