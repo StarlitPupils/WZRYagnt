@@ -205,8 +205,9 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     def ready(key, thr):
         return now - float(cooldowns.get(key, 0.0)) > thr
 
-    # ---- v2.72 dominant skills; v2.84 release rule: screen enemy boxes = fire;
-    #      minimap red dot only at EXTREMELY close (<0.15) + 2-frame stable ----
+    # ---- v2.72 dominant skills; v2.97 用户规则(铁): 小地图红点**禁止**触发技能/出钩
+    #      (红点闪烁位置不准 -> 乱出钩); 只有小地图之外=屏幕上 敌英框/敌红条 才释放。
+    #      出钩(skill2)额外要求: 屏幕敌英在二技能范围内(SKILL2_RANGE_FRAC) ----
     _mmr_pts0 = ((state_dict.get("minimap") or {}).get("dots") or {}).get("red") or []
     _mm_own0 = _mm_self(state_dict)
     # v2.89 红点距离只有在自己绿点已知时才有意义(泉水/未追踪=0.5,0.5兜底曾触发空放)
@@ -216,8 +217,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         cooldowns["red_stable"] = float(cooldowns.get("red_stable", 0)) + 1
     else:
         cooldowns["red_stable"] = 0
-    if enemies or enemy_bars or (len(_mmr_pts0) >= 1 and _d_red0 < 0.15
-                   and cooldowns.get("red_stable", 0) >= 2):
+    # v2.97: 释放证据 = 屏幕敌英(yolo) 或 屏幕敌红条; 红点(_mmr_pts0)不参与
+    if enemies or enemy_bars:
         _nq0 = nearest(enemies) if enemies else None
         _dq0 = dist_width(_nq0[0], _nq0[1]) if _nq0 else 0.90
         _s_ = (state_dict.get("ui") or {}).get("skill_states") or {}
@@ -228,7 +229,9 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             cooldowns["skill3_t"] = now
             cooldowns["skill"] = now
             return {"type": "skill", "id": 3, "mode": "tap", "reason": "ult_near_enemy"}
-        if ready("skill2_t", SKILL2_THROTTLE_S) and _s2_.get("unlocked") is not False:
+        # v2.97 出钩铁律: 屏幕敌英在二技能范围内才出钩; 只有红条无框时不勾(位置不可靠)
+        if _nq0 is not None and _dq0 <= SKILL2_RANGE_FRAC \
+                and ready("skill2_t", SKILL2_THROTTLE_S) and _s2_.get("unlocked") is not False:
             cooldowns["skill2_t"] = now
             cooldowns["skill"] = now
             cooldowns["hook_pending"] = now
@@ -295,11 +298,12 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                               and 0.0 <= float(_mp_raw) <= 1.0) else _mp_est
     skill_states = (state_dict.get("ui") or {}).get("skill_states") or {}
     # v2.70 鏁屼汉璇佹嵁=灞忓箷鏁岃嫳妗鎴忓湴鍥剧孩鐐浠绘剰璺濈, 鐢埛璇箟: 鍑虹幇鍗虫墦)
+    # v2.97 释放证据 = 屏幕敌英/敌红条(小地图红点不参与出钩与技能)
     _mmr_pts = ((state_dict.get("minimap") or {}).get("dots") or {}).get("red") or []
-    _mm_own = _mm_self(state_dict) or (0.5, 0.5)
-    _d_red_near = min([math.hypot(p[0] - _mm_own[0], p[1] - _mm_own[1]) for p in _mmr_pts],
-                      default=9.9)
-    if enemies or enemy_bars or (_mm_own is not None and _d_red_near < 0.15):
+    _mm_own = _mm_self(state_dict)
+    _d_red_near = (min([math.hypot(p[0] - _mm_own[0], p[1] - _mm_own[1]) for p in _mmr_pts],
+                       default=9.9) if _mm_own else 9.9)
+    if enemies or enemy_bars:
         _nq = nearest(enemies) if enemies else None
         _dq = dist_width(_nq[0], _nq[1]) if _nq else 0.90
         _s3q = skill_states.get("3") or {}
@@ -325,12 +329,14 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         # 鈶鏁岃繎韬 澶嫑辩华鍏堝 -> 鈶閽-> 鈶涓鎶鑳(v2.66: 鏈夋晫璇佹嵁鍗虫斁, 璺濈涓嶆煡)
         in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= 3.5
         if ready("skill3_t", 20.0) and _s3q.get("unlocked") is not False \
-                and (_dq < 0.75 or (_mm_own is not None and _d_red_near < 0.15)):
+                and _dq < 0.75:
             cooldowns["skill3_t"] = now
             cooldowns["skill"] = now
             return {"type": "skill", "id": 3, "mode": "tap", "reason": "ult_near_enemy"}
-        if not in_ult and ready("skill2_t", SKILL2_THROTTLE_S) and _s2q.get("unlocked") is not False:
-            # v2.68: 鐩存帴鏀鍒犻櫎璺緞闃绘尅妫鏌斺斿叾鎷埅浜嗚创鑴告晫鑻卞鑷存案涓嶅嚭閽
+        # v2.97 出钩铁律: 屏幕敌英在二技能范围内才出钩(红条仅作射击参考, 不出钩)
+        if not in_ult and _nq is not None and _dq <= SKILL2_RANGE_FRAC \
+                and ready("skill2_t", SKILL2_THROTTLE_S) \
+                and _s2q.get("unlocked") is not False:
             cooldowns["skill2_t"] = now
             cooldowns["skill"] = now
             cooldowns["hook_pending"] = now
@@ -345,7 +351,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         # v2.65 鈶鏁屼汉瀛樺湪辨櫘鏀        if ready("attack_t", ATTACK_THROTTLE_S):
             cooldowns["attack_t"] = now
             return {"type": "attack", "priority": "free", "reason": "engage_enemy"}
-        # v2.71 鎶鑳介棬鑷洕(1s鑺傛祦): 鏈夋晫璇佹嵁鍗存湭鍑轰换浣曟妧鑳芥椂鎵撳嵃鍏抽敭閲        if (enemies or len(_mmr_pts) >= 1):
+        # v2.71 鎶鑳介棬鑷洕(1s鑺傛祦): 鏈夋晫璇佹嵁鍗存湭鍑轰换浣曟妧鑳芥椂鎵撳嵃鍏抽敭閲        if enemies or enemy_bars:
             _sg = cooldowns.get("sg_t", 0.0)
             if now - float(_sg) > 1.0:
                 cooldowns["sg_t"] = now
