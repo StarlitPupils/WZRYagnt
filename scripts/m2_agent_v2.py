@@ -760,6 +760,13 @@ def apply_action(ex, action: dict, cooldowns: dict):
 # 瀹炴椂鍒嗘瀽鏍囨敞坴2.15: 姣忓抚鍏绱犳爣娉-> temp/live_annot/屼緵浜哄伐鏍告煡 AI 鐞嗚# ---------------------------------------------------------------------------
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
+# recovered consts (from v3.1)
+RECALL_THROTTLE_S = 20.0
+RECALL_ACTIVE_S = 8.0
+TURRET_SAFE_FRAC = 0.55
+TURRET_THREAT_FRAC = 0.45
+ENGAGE_FRAC = 0.30
+
 _FONT_CACHE = {}
 
 
