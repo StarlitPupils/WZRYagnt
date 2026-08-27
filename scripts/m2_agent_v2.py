@@ -1162,12 +1162,22 @@ def main():
                         _sel_row = "blue" if _name_y < 360 else "red"
                 except Exception:
                     _sel_row = None
-                if _sel_row and not cooldowns.get("camp"):
-                    cooldowns["camp"] = _sel_row
-                    cooldowns.pop("camp_votes", None)
-                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断(选人排位): "
-                          f"{'蓝方' if _sel_row == 'blue' else '红方'} → "
-                          f"发育路方向 {LANE_DIR_BLUE if _sel_row == 'blue' else LANE_DIR_RED}")
+                # v3.6 门控: 3帧稳定名牌行才锁(防结算/大厅白色文字误判), 且仅 WAITING 阶段
+                if _sel_row:
+                    _prev_row = cooldowns.get("sel_row_prev")
+                    _row_streak = int(cooldowns.get("sel_row_streak", 0))
+                    if _prev_row == _sel_row:
+                        _row_streak += 1
+                    else:
+                        _row_streak = 1
+                    cooldowns["sel_row_prev"] = _sel_row
+                    cooldowns["sel_row_streak"] = _row_streak
+                    if _row_streak >= 3 and not cooldowns.get("camp"):
+                        cooldowns["camp"] = _sel_row
+                        cooldowns.pop("camp_votes", None)
+                        print(f"[{datetime.now():%H:%M:%S}] 阵营判断(选人排位3帧): "
+                              f"{'蓝方' if _sel_row == 'blue' else '红方'} → "
+                              f"发育路方向 {LANE_DIR_BLUE if _sel_row == 'blue' else LANE_DIR_RED}")
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
                     _async_result_detect(frame, reward)
