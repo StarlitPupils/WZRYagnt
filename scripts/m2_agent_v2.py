@@ -1045,6 +1045,13 @@ def main():
     frame_id = 0
     prev_phase = None
     n_frames = 0
+    # v2.81 自我诊断(截图留存, 供 DeepSeek 视觉审检)
+    try:
+        from wzry.diagnose.self_check import SelfCheckDiagnostician
+        self_check = SelfCheckDiagnostician(interval_s=20.0)
+        self_check.start()
+    except Exception:
+        self_check = None
     n_ticks = 0
     n_actions = 0
     infer_sum = 0.0
@@ -1072,11 +1079,16 @@ def main():
             n_frames += 1
             phase = sm.update(frame)
             now = time.time()
+            # v2.81 self-diagnose feed (AI 审检截图留存)
+            try:
+                if self_check is not None:
+                    self_check.feed(frame, dets)
+            except Exception:
+                pass
             if phase != MatchPhase.IN_MATCH:
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
-                    _async_result_detect(frame, reward)
-                prev_phase = phase
+                    _async_result_detect(frame, reward)                prev_phase = phase
                 confirm_streak = 0
                 confirmed = False
                 _last_move[:] = (None, None, 0.0)   # 闈炲灞鏉惧紑鎽囨潌
