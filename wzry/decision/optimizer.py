@@ -155,13 +155,7 @@ def gen_candidates(f):
     for i, (cxn, cyn, tag) in enumerate(((down_c[0], down_c[1], "lane_down"),
                                          (mid_c[0], mid_c[1], "lane_mid"))):
         mc(cxn, cyn, tag)
-    # 4) 蹲草点: 红与己连线中段(安全侧) 2 点
-    if reds:
-        tr = min(reds, key=lambda p: (p[0] - gx) ** 2 + (p[1] - gy) ** 2)
-        dr = math.hypot(tr[0] - gx, tr[1] - gy)
-        if 0.25 <= dr <= 0.70:
-            for k in (0.35, 0.55):
-                mc(gx + (tr[0] - gx) * k, gy + (tr[1] - gy) * k, "hold_hook")
+    # 4) v3.1 用户铁律: 不蹲草! 删除 hold_hook 蹲草点(红己连线中段)
     # 5) 战斗微操: 每个近敌(屏内) 8 向走位(≤2敌) + 撤离
     for i, e in enumerate(f["e_scr"][:2]):
         ex, ey = float(e[0]) - gx, float(e[1]) - gy
