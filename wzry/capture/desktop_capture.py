@@ -28,20 +28,31 @@ class _BMIH(ctypes.Structure):
 
 
 def _find_mumu():
+    """v2.88 找 MuMu 窗口: ①必须可见(IsWindowVisible) ②面积最大 ③标题含'模拟器'优先。
+    旧版只按面积 -> 曾选中隐藏的 MuMuNxDevice(1.79M) 而非真·MuMu模拟器12(2.03M,可见)
+    -> 代理看到的永远是黑屏/空窗, 无法进对局。"""
     best = None
     best_area = 0
     CB = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def score(h, title):
+        r = wintypes.RECT()
+        user32.GetWindowRect(h, ctypes.byref(r))
+        w, hh = r.right - r.left, r.bottom - r.top
+        area = w * hh
+        if not user32.IsWindowVisible(h) or area < 40000:
+            return None
+        bonus = 10e9 if ("模拟器" in title) else 0   # 真主窗标题=MuMu模拟器12
+        return area + bonus
 
     def cbk(h, l):
         nonlocal best, best_area
         n = ctypes.create_unicode_buffer(128)
         user32.GetWindowTextW(h, n, 128)
         if "MuMu" in n.value:
-            r = wintypes.RECT()
-            user32.GetWindowRect(h, ctypes.byref(r))
-            area = (r.right - r.left) * (r.bottom - r.top)
-            if area > best_area:
-                best_area, best = area, (int(h), n.value)
+            s = score(h, n.value)
+            if s is not None and s > best_area:
+                best_area, best = s, (int(h), n.value)
         return True
 
     user32.EnumWindows(CB(cbk), 0)
