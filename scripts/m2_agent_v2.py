@@ -1165,13 +1165,23 @@ def main():
                 # v3.7 名牌行铁律: 仅当"真选人界面"(上下排各有较多白色名牌文字带)时判阵营
                 #   连续3帧稳定才锁; 结算/大厅页只有单一文字带 -> 不满足双带条件, 永不锁
                 try:
+                    # v3.8 严判真选人界面: 上下排各5卡 + 中部有蓝/红队伍色条(VS标识)
                     _hsvS2 = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                     _S2, _V2 = _hsvS2[..., 1].astype(int), _hsvS2[..., 2].astype(int)
                     _wh2 = ((_S2 < 60) & (_V2 > 200)).astype(np.uint8)
                     _rowsum2 = _wh2[:, 150:1130].sum(axis=1)
                     _up_band2 = int(_rowsum2[40:280].max())
                     _lo_band2 = int(_rowsum2[420:660].max())
-                    _dual_band = _up_band2 >= 80 and _lo_band2 >= 80
+                    # 中部 VS 区带: 蓝色或红色队伍条 (y 300-420 左右)
+                    _vs_roi = frame[300:430, 480:800]
+                    _hsv_vs = cv2.cvtColor(_vs_roi, cv2.COLOR_BGR2HSV)
+                    _hv = _hsv_vs[..., 0].astype(int)
+                    _sv = _hsv_vs[..., 1].astype(int)
+                    _vv = _hsv_vs[..., 2].astype(int)
+                    _vs_blue = int(((_hv >= 85) & (_hv <= 135) & (_sv > 60) & (_vv > 60)).sum())
+                    _vs_red = int((((_hv <= 15) | (_hv >= 165)) & (_sv > 60) & (_vv > 60)).sum())
+                    _vs_big = max(_vs_blue, _vs_red) >= 300
+                    _dual_band = _up_band2 >= 80 and _lo_band2 >= 80 and _vs_big
                 except Exception:
                     _dual_band = False
                 if _sel_row and _dual_band:
