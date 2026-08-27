@@ -1088,7 +1088,8 @@ def main():
             if phase != MatchPhase.IN_MATCH:
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
-                    _async_result_detect(frame, reward)                prev_phase = phase
+                    _async_result_detect(frame, reward)
+                prev_phase = phase
                 confirm_streak = 0
                 confirmed = False
                 _last_move[:] = (None, None, 0.0)   # 闈炲灞鏉惧紑鎽囨潌
@@ -1505,13 +1506,21 @@ def main():
                     else:
                         recorder.on_action(rec)
 
-            # ---- v2.15 瀹炴椂鍒嗘瀽鏍囨敞钀界洏坱emp/live_annot/ 绐楀彛鍚屾簮鏄剧 ----
+            # ---- v2.15 实时分析标注落盘(temp/live_annot/ 窗口同源显示) ----
             try:
                 vis_out = render_live_analysis(frame, dets, mm, state_dict, action, beh,
                                                reward.total, now)
             except Exception as e:
-                print(f"[annot] 娓叉煋寮傚父: {e}")
+                print(f"[annot] 渲染异常: {e}")
                 vis_out = frame.copy()
+
+            # v2.81 self-diagnose: 带标注帧 + 血条读数 一起送 AI 审检
+            try:
+                if self_check is not None:
+                    self_check.feed(vis_out, dets,
+                                    ui=(state_dict.get("ui") or {}))
+            except Exception:
+                pass
 
             # ---- 鍛湡鏃織 / 棰勮 ----
             if now - last_log >= 0.5:

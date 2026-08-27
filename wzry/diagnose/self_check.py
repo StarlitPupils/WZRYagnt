@@ -23,6 +23,7 @@ class SelfCheckDiagnostician:
         self.interval = interval_s
         self.last_frame = None
         self.last_dets = []
+        self.last_ui = {}
         self.lock = threading.Lock()
         self._stop = False
         self.thread = threading.Thread(target=self._loop, daemon=True)
@@ -35,10 +36,11 @@ class SelfCheckDiagnostician:
     def stop(self):
         self._stop = True
 
-    def feed(self, frame, dets):
+    def feed(self, frame, dets, ui=None):
         with self.lock:
             self.last_frame = frame
             self.last_dets = list(dets)
+            self.last_ui = dict(ui or {})
 
     def _loop(self):
         while not self._stop:
@@ -59,8 +61,13 @@ class SelfCheckDiagnostician:
                     "cy": float(d.center[1]),
                     "box": [round(float(v), 1) for v in d.xyxy],
                 } for d in dets]
+                _ui = None
+                with self.lock:
+                    _ui = getattr(self, "last_ui", {}) or {}
                 (OUT_DIR / f"meta_{ts}.json").write_text(
-                    json.dumps({"t": ts, "dets": meta}, ensure_ascii=False),
+                    json.dumps({"t": ts, "dets": meta,
+                                "ui": {"hp": _ui.get("hp"), "mp": _ui.get("mp")}},
+                               ensure_ascii=False),
                     encoding="utf-8")
                 self.saved += 1
                 # 环形清理: 只留最近 MAX_KEEP 张
