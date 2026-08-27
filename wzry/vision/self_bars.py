@@ -107,6 +107,8 @@ def detect_all_bars(frame):
     蓝条（队友）过滤：
       - 宽度 <= 80（场景/UI 宽条误检排除）
       - 远离自己绿条（自己蓝量条不算队友）
+    v2.92: 敌人红条专属过滤 y>=300 (顶部头像条 y240-300 红边=队友头像误判) + x>=380
+            (左上角小队头像条列 x 220-380 全为 UI)
     """
     def is_green(H, S, V):
         return (H >= 35) & (H <= 90) & (S > 50)
@@ -122,6 +124,9 @@ def detect_all_bars(frame):
         "allies": _find_bars(frame, is_blue, "ally"),
         "enemies": _find_bars(frame, is_red, "enemy"),
     }
+    # v2.92 敌人红条 UI 带排除: 顶部头像条区(y<300, x<380)与左列小队头像条(x<380)
+    result["enemies"] = [b for b in result["enemies"]
+                         if b["y"] >= 300 and b["x"] >= 380]
     # 蓝条过滤：宽条（>80）排除；自己绿条旁 60px 内的蓝条=自己蓝量，排除
     if result["self"]:
         self_bars = result["self"]

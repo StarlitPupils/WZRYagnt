@@ -40,6 +40,10 @@ def _find_mumu():
         user32.GetWindowRect(h, ctypes.byref(r))
         w, hh = r.right - r.left, r.bottom - r.top
         area = w * hh
+        # v2.92 离屏窗口排除: MuMu 最小化/失焦时 rect 被移到 (-32000,-32000)
+        #    IsWindowVisible 仍返回 True -> 必须检查坐标落在屏幕内
+        if r.right < 0 or r.bottom < 0 or r.left > 5000 or r.top > 5000:
+            return None
         if not user32.IsWindowVisible(h) or area < 40000:
             return None
         bonus = 10e9 if ("模拟器" in title) else 0   # 真主窗标题=MuMu模拟器12
