@@ -64,6 +64,14 @@ class SelfCheckDiagnostician:
                 _ui = None
                 with self.lock:
                     _ui = getattr(self, "last_ui", {}) or {}
+                # v2.88 meta 自检: ui 缺失时本地重算(旧版 feed 未传 ui -> 永远 null, 无法诊断)
+                if not _ui.get("hp"):
+                    try:
+                        from wzry.vision.self_bars import self_hp_mp
+                        _hp, _mp, _pos = self_hp_mp(fr)
+                        _ui = {"hp": _hp, "mp": _mp}
+                    except Exception:
+                        pass
                 (OUT_DIR / f"meta_{ts}.json").write_text(
                     json.dumps({"t": ts, "dets": meta,
                                 "ui": {"hp": _ui.get("hp"), "mp": _ui.get("mp")}},
