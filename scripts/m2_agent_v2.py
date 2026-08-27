@@ -568,12 +568,15 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                     reason = "follow_ally_lowhp"
             if target is None and not in_opening:
                 # 韫茬偣绐楀彛 v2.33(瀛敤鎴: 鍔ｅ娍韫查槻闃堝.6, 寮灞0.8, 骞虫椂0.7; 鐭共3-9s
+                # v2.92 蹲草窗口: 只有中/下走廊红点才算"近敌等待"(河道/上路红点=不蹲, 继续路线)
                 _combat_now = bool(enemies) or bool(enemy_bars)
                 _hold_g = (mm.get("dots") or {}).get("green") or []
+                _mm_red_cor = [p for p in mm_red
+                               if _corridor(p, _down_c, 0.35) or _corridor(p, _mid_c, 0.35)]
                 _hold_hp = 0.6 if len(mm_red) > len(mm_blue) else (0.8 if in_opening else 0.7)
-                if mm_red and not _combat_now and hp >= _hold_hp:
+                if _mm_red_cor and not _combat_now and hp >= _hold_hp:
                     _mx, _my = _hold_g[0] if _hold_g else (0.5, 0.5)
-                    _nr = min(mm_red, key=lambda p: (p[0]-_mx)**2 + (p[1]-_my)**2)
+                    _nr = min(_mm_red_cor, key=lambda p: (p[0]-_mx)**2 + (p[1]-_my)**2)
                     _dr = math.hypot(_nr[0]-_mx, _nr[1]-_my)
                     if 0.30 <= _dr <= 0.60:
                         return {"type": "none", "reason": "hold_wait_hook"}
