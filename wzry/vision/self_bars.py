@@ -251,7 +251,7 @@ def self_hp_mp(frame):
         return (H >= 35) & (H <= 90) & (S > 50)
 
     def is_blue(H, S, V):
-        return (H >= 90) & (H <= 135) & (S > 60) & (V > 60)
+        return (H >= 85) & (H <= 140) & (S > 35) & (V > 35)   # v2.80 放宽(PW帧S偏低)
 
     greens = _find_bars(frame, is_green, "self")
     if not greens:

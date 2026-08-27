@@ -275,9 +275,18 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         if now - hook_pending > HOOK_CONFIRM_S:
             cooldowns["hook_pending"] = 0.0
 
-    # ---- v2.60 鏃犺剳杈撳嚭娴鐢埛): 鏁岃嫳鍦寖鍥村唴, 鎶鑳戒笉鍦喎鍗村氨鐩存帴鏀----
+    # ---- brainless fire (skills if enemy present) ----
     _hpq = float((state_dict.get("ui") or {}).get("hp") or 1.0)
-    _mpq = float((state_dict.get("ui") or {}).get("mp") or 1.0)
+    # v2.80 mana: fallback = skill-cost estimate when measurement missing
+    _mp_raw = (state_dict.get("ui") or {}).get("mp")
+    _skill_cnt = 0
+    for _sk in ("skill1_t", "skill2_t", "skill3_t"):
+        _st = float(cooldowns.get(_sk, 0.0) or 0.0)
+        if _st and now - _st < 90.0:
+            _skill_cnt += 1
+    _mp_est = max(0.0, round(1.0 - 0.06 * _skill_cnt, 2))
+    _mpq = float(_mp_raw) if (_mp_raw is not None and _mp_raw == _mp_raw
+                              and 0.0 <= float(_mp_raw) <= 1.0) else _mp_est
     skill_states = (state_dict.get("ui") or {}).get("skill_states") or {}
     # v2.70 鏁屼汉璇佹嵁=灞忓箷鏁岃嫳妗鎴忓湴鍥剧孩鐐浠绘剰璺濈, 鐢埛璇箟: 鍑虹幇鍗虫墦)
     _mmr_pts = ((state_dict.get("minimap") or {}).get("dots") or {}).get("red") or []
@@ -835,12 +844,8 @@ def render_live_analysis(frame, dets, mm, state_dict, action, beh, score, now):
     ui = state_dict.get("ui") or {}
     hp = float(ui.get("hp") or 0.0)
     mp = float(ui.get("mp") or 0.0)
-    hero_pos = (state_dict.get("extra") or {}).get("hero_pos")
-    if hero_pos:
-        cv2.circle(vis, (int(hero_pos[0]), int(hero_pos[1])), 12, (255, 0, 255), 3)
-        _ltext(vis, "hero",
-               (min(int(hero_pos[0]) + 16, w - 280), max(20, int(hero_pos[1]) - 10)),
-               17, (255, 255, 255))
+    # v2.80 hero 全屏标记已删: 自己在屏幕中央固定, 不需要检测/显示 (仅下方血量数字)
+    _dummy_hero = None
 
     # 忓湴鍥惧叏瑕佺礌 2x堝彸涓婏級v2.25: 鍏箙 0-242 (鍚笅杈规娉夋按鍖
     v7 = (mm or {}).get("v7") or {}
