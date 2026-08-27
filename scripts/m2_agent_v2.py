@@ -203,7 +203,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     def ready(key, thr):
         return now - float(cooldowns.get(key, 0.0)) > thr
 
-    # ---- v2.72 鏀厤鎬妧鑳芥(鏈椤; v2.77 绾偣闇绋冲畾2甯0.35鍐呮墠瑙彂(闃茶妫涔辨斁) ----
+    # ---- v2.72 dominant skills; v2.84 release rule: screen enemy boxes = fire;
+    #      minimap red dot only at EXTREMELY close (<0.15) + 2-frame stable ----
     _mmr_pts0 = ((state_dict.get("minimap") or {}).get("dots") or {}).get("red") or []
     _mm_own0 = _mm_self(state_dict) or (0.5, 0.5)
     _d_red0 = min([math.hypot(p[0] - _mm_own0[0], p[1] - _mm_own0[1]) for p in _mmr_pts0],
@@ -212,7 +213,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         cooldowns["red_stable"] = float(cooldowns.get("red_stable", 0)) + 1
     else:
         cooldowns["red_stable"] = 0
-    if enemies or (len(_mmr_pts0) >= 1 and _d_red0 < 0.35
+    if enemies or (len(_mmr_pts0) >= 1 and _d_red0 < 0.15
                    and cooldowns.get("red_stable", 0) >= 2):
         _nq0 = nearest(enemies) if enemies else None
         _dq0 = dist_width(_nq0[0], _nq0[1]) if _nq0 else 0.90
