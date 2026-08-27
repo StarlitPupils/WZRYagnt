@@ -55,6 +55,21 @@ class BehaviorTagger:
         self._pending_hook = 0.0   # 勾到人时间（延迟确认：3s 内击杀则计 hook_kill）
         self._recall_interrupted_reported = False
 
+    def reset_match(self):
+        """v2.95 新对局开始: 清零死亡/横幅残留(上局死亡 _dead_since 40s内会污染新局 ->
+        开局 hp=None + 残留 -> 假 died -50)"""
+        self._hp_miss_streak = 0
+        self._hp_miss_since = 0.0
+        self._last_hp = None
+        self._dead_reported = False
+        self._dead_since = None
+        self._banner_streak = 0
+        self._last_near_enemies = 0
+        self._last_near_minions = 0
+        self._last_near_turrets = 0
+        self._pending_hook = 0.0
+        self._recall_interrupted_reported = False
+
     def update(self, state_dict, cooldowns, action, now=None) -> dict:
         """每帧调用。返回 {"label", "event", "dead", ...}。"""
         now = now if now is not None else float(state_dict.get("t") or time.time())

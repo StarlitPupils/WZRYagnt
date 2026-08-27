@@ -1179,6 +1179,11 @@ def main():
             # match start time
             if not cooldowns.get("match_start_t"):
                 cooldowns["match_start_t"] = now
+                # v2.95 新对局开始: 清零行为层死亡残留(上局 _dead_since 污染 -> 开局假died)
+                try:
+                    tagger.reset_match()
+                except Exception:
+                    pass
 
             # ---- 寮灞闃佃惀鍒柇 v2.22堣嚜宸辩豢鐐瑰嚭鐢熻鍒畾, 娉夋按鑹蹭粎鍏滃簳---
             if not cooldowns.get("camp"):
