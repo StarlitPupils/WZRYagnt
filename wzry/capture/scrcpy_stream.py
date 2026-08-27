@@ -132,15 +132,43 @@ class ScrcpyStreamCapture:
                         self._start_pipeline()
                         self._drain()
                 else:
-                    # 到达文件尾（ffmpeg 不轮询追加数据）：重开同文件并排空历史帧
+                    # v2.23 文件尾(写入中): 等待追加重试, 贴实时边缘读数(不再重开轮回旧片)
                     if self._proc and self._proc.poll() is not None:
-                        # scrcpy 退出 -> 整条流水线重启
                         self._teardown_pipeline()
                         self._start_pipeline()
-                    elif self._cap:
-                        self._cap.release()
-                        self._cap = cv2.VideoCapture(str(self._file))
-                    self._drain()
+                        continue
+                    time.sleep(0.05)
+                    ok2 = self._cap.read()
+                    if ok2 and ok2[0]:
+                        frame = ok2[1]
+                        with self._lock:
+                            self._latest = frame
+                            self._latest_t = time.time()
+                            self.last_size = (frame.shape[1], frame.shape[0])
+                        with self._cond:
+                            self._cond.notify_all()
+                    else:
+                        # 连续重试(最多 6s)后仍无增长 -> 重开并排空已读进度
+                        stalled = True
+                        for _ in range(120):
+                            time.sleep(0.05)
+                            ok3 = self._cap.read()
+                            if ok3 and ok3[0]:
+                                frame = ok3[1]
+                                with self._lock:
+                                    self._latest = frame
+                                    self._latest_t = time.time()
+                                    self.last_size = (frame.shape[1], frame.shape[0])
+                                with self._cond:
+                                    self._cond.notify_all()
+                                stalled = False
+                                break
+                        if stalled:
+                            old_count = int(self._cap.get(cv2.CAP_PROP_POS_FRAMES))
+                            self._cap.release()
+                            self._cap = cv2.VideoCapture(str(self._file))
+                            if old_count > 0:
+                                self._cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, old_count - 5))
             except Exception:
                 time.sleep(0.2)
                 try:

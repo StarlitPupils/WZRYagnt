@@ -61,23 +61,62 @@ class AdbExecutor:
         self.cmd_count = 0
 
     def _auto_serial(self):
+        # v2.58 自愈: 先尝试连固定 MuMu 端口, 再枚举
+        try:
+            subprocess.run([ADB, "connect", "127.0.0.1:16384"],
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=5)
+        except Exception:
+            pass
         serials = discover_mumu_adb_devices()
+        if not serials:
+            time.sleep(1.5)
+            try:
+                subprocess.run([ADB, "connect", "127.0.0.1:16384"],
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=5)
+            except Exception:
+                pass
+            serials = discover_mumu_adb_devices()
         if not serials:
             raise RuntimeError("未发现 MuMu ADB 设备，请先启动模拟器并确认 adb 已连接")
         return serials[0]
 
     # ---------- 基础命令 ----------
-    def _run(self, args, timeout=15):
+    def _run(self, args, timeout=4):
+        """adb 命令: 4s 超时快速失败(防主循环卡死), 失败自动重连一次, 永不抛出。"""
         t0 = time.perf_counter()
-        with self._lock:
-            r = subprocess.run(
-                [ADB, "-s", self.serial] + args,
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=timeout,
-            )
+        try:
+            with self._lock:
+                r = subprocess.run(
+                    [ADB, "-s", self.serial] + args,
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=timeout,
+                )
+        except subprocess.TimeoutExpired:
+            self._reconnect()
+            with self._lock:
+                try:
+                    r = subprocess.run(
+                        [ADB, "-s", self.serial] + args,
+                        capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", timeout=timeout,
+                    )
+                except Exception:
+                    return None
+        except Exception:
+            return None
         self.last_cmd_ms = (time.perf_counter() - t0) * 1000.0
         self.cmd_count += 1
         return r
+
+    def _reconnect(self):
+        try:
+            subprocess.run([ADB, "connect", self.serial],
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=5)
+        except Exception:
+            pass
 
     def get_device_size(self):
         """读取设备物理分辨率 (w, h)，来自 `wm size`。"""

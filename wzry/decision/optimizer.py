@@ -1,0 +1,266 @@
+# -*- coding: utf-8 -*-
+"""最优决策器 v2.41: 大规模候选枚举(30-80个) + 向量化价值评估 + argmax 最优解。
+
+候选空间:
+  - 每个敌方单位(屏幕英雄框/红点) -> 支援/进攻点(≤6)
+  - 每个队友蓝点 -> 跟队点(≤5)
+  - 每塔(敌塔推进/己塔防守) -> 推/守点(≤4)
+  - 战斗微操: 每个近敌 8 方向走位点(≤16) + 边打边撤点
+  - 技术候选: 钩(敌框<0.32)/一技能/普攻/连招
+  - 战术候选: 蹲草(2点)/清线/转线/撤退/原地
+单次求解(全部候选) 目标 < 1ms。
+"""
+import json
+import math
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+_DEFAULT_W = {
+    "w_win": 1.0, "w_safe": 1.2, "w_map": 0.6, "w_risk": 2.0,
+    "w_hold": 0.4, "w_skill": 1.4, "w_micro": 0.3,
+    "k_win_enemy": 1.5, "k_win_support": 0.6,
+}
+
+_W = dict(_DEFAULT_W)
+
+
+def load_weights():
+    global _W
+    try:
+        p = ROOT / "configs" / "value_weights.json"
+        if p.exists():
+            _W = {**_DEFAULT_W, **json.loads(p.read_text(encoding="utf-8"))}
+    except Exception:
+        pass
+
+
+def save_weights():
+    try:
+        (ROOT / "configs" / "value_weights.json").write_text(
+            json.dumps(_W, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def refresh_weights(new_w):
+    """v2.62 在线学习注入: 局中更新价值权重(内存直写, 下一决策立即生效)。"""
+    global _W
+    if new_w:
+        _W = {**_DEFAULT_W, **new_w}
+
+
+def _feat(state, hp):
+    """一次性提取环境特征(供所有候选复用)。"""
+    mm = state.get("minimap") or {}
+    dots = (mm.get("dots") or {}) if mm.get("found") else {}
+    reds = dots.get("red") or []
+    blues = dots.get("blue") or []
+    greens = dots.get("green") or []
+    gx, gy = greens[0] if greens else (0.5, 0.5)
+    units = state.get("units") or []
+    enemies_scr = []
+    minions_e = []
+    for u in units:
+        scr = u.get("screen") or [0.5, 0.5]
+        if u.get("cls") == "enemy_hero":
+            enemies_scr.append(scr)
+        elif u.get("cls") == "enemy_minion":
+            minions_e.append(scr)
+    return {"reds": reds, "blues": blues, "g": (gx, gy), "hp": hp,
+            "e_scr": enemies_scr, "e_min": minions_e}
+
+
+def _grid_best(f, camp="blue"):
+    """微地图像素级密集采样(4096 点) 向量化评估 -> 最优移动点。
+       V_grid = w_win*击杀场 - w_risk*敌群场 + w_safe*协同场 + w_map*走廊场 - 距离成本
+       返回 (nx, ny, score) 单个 numpy 矩阵运算, ~0.3ms。"""
+    import numpy as np
+    N = 64                      # 64x64 = 4096 候选
+    xs = np.linspace(0.02, 0.98, N)
+    gx, gy = f["g"]
+    hpx, hpy = f["hp"], f["hp"]
+    GX, GY = np.meshgrid(xs, xs)
+    V = np.zeros((N, N))
+    if f["reds"]:
+        rx = np.array([p[0] for p in f["reds"]])
+        ry = np.array([p[1] for p in f["reds"]])
+        d_red = np.sqrt((GX[..., None] - rx) ** 2 + (GY[..., None] - ry) ** 2).min(axis=-1)
+        if len(f["reds"]) < 6:      # v2.53 敌群>=6: 红场清零(不向敌群走)
+            V += _W["w_win"] * _W["k_win_enemy"] * np.exp(-d_red / 0.08)
+            n_near = ((np.sqrt((GX[..., None] - rx) ** 2 + (GY[..., None] - ry) ** 2) < 0.15)
+                      .sum(axis=-1))
+            V -= _W["w_risk"] * (0.5 * (n_near >= 3) + 0.25 * (n_near == 2))
+    if f["blues"]:
+        bx = np.array([p[0] for p in f["blues"]])
+        by = np.array([p[1] for p in f["blues"]])
+        d_blue = np.sqrt((GX[..., None] - bx) ** 2 + (GY[..., None] - by) ** 2).min(axis=-1)
+        V += _W["w_safe"] * 0.5 * np.exp(-d_blue / 0.10)
+    down_c = (0.75, 0.72) if camp == "blue" else (0.25, 0.28)
+    mid_c = (0.5, 0.58) if camp == "blue" else (0.5, 0.42)
+    V += _W["w_map"] * 2.8 * np.exp(-np.sqrt((GX - down_c[0]) ** 2 + (GY - down_c[1]) ** 2) / 0.20)
+    V += _W["w_map"] * 1.2 * np.exp(-np.sqrt((GX - mid_c[0]) ** 2 + (GY - mid_c[1]) ** 2) / 0.20)
+    d_self = np.sqrt((GX - gx) ** 2 + (GY - gy) ** 2)
+    if f["hp"] < 0.8:
+        V -= 0.8 * (d_self > 0.5)
+    iy, ix = np.unravel_index(int(np.argmax(V)), V.shape)
+    return float(xs[ix]), float(xs[iy]), float(V[iy, ix])
+
+
+def gen_candidates(f):
+    """枚举大候选空间 -> [(action, tag)]"""
+    gx, gy = f["g"]
+    reds, blues = f["reds"], f["blues"]
+    hp = f["hp"]
+    down_c = (0.75, 0.75)
+    mid_c = (0.5, 0.58)
+    cands = []
+
+    def mc(x, y, tag):
+        cands.append(({"type": "map_move", "nx": max(0.02, min(0.98, x)),
+                       "ny": max(0.02, min(0.98, y)), "reason": tag}, tag))
+
+    # 1) 红点=支援/进攻(≤6)  v2.63: 下路强优先(下路走廊池), mid 仅下路空时兜底
+    down_c = (0.75, 0.72)
+    mid_c = (0.5, 0.58)
+    _down_pts = [p for p in reds[:8] if
+                 math.hypot(p[0] - down_c[0], p[1] - down_c[1]) <= 0.32]
+    _corridor_pts = _down_pts
+    if not _down_pts:
+        _corridor_pts = [p for p in reds[:8] if
+                         math.hypot(p[0] - mid_c[0], p[1] - mid_c[1]) <= 0.32]
+    for i, p in enumerate(_corridor_pts[:6]):
+        tag = f"support_red{i}"
+        mc(p[0], p[1], tag)
+    # 2) 每个蓝点=跟队(≤5)
+    for i, p in enumerate(blues[:5]):
+        mc(p[0], p[1], f"follow_blue{i}")
+    # 3) 走廊战术点: 下路/中路走廊中心
+    for i, (cxn, cyn, tag) in enumerate(((down_c[0], down_c[1], "lane_down"),
+                                         (mid_c[0], mid_c[1], "lane_mid"))):
+        mc(cxn, cyn, tag)
+    # 4) 蹲草点: 红与己连线中段(安全侧) 2 点
+    if reds:
+        tr = min(reds, key=lambda p: (p[0] - gx) ** 2 + (p[1] - gy) ** 2)
+        dr = math.hypot(tr[0] - gx, tr[1] - gy)
+        if 0.25 <= dr <= 0.70:
+            for k in (0.35, 0.55):
+                mc(gx + (tr[0] - gx) * k, gy + (tr[1] - gy) * k, "hold_hook")
+    # 5) 战斗微操: 每个近敌(屏内) 8 向走位(≤2敌) + 撤离
+    for i, e in enumerate(f["e_scr"][:2]):
+        ex, ey = float(e[0]) - gx, float(e[1]) - gy
+        for ang in range(8):
+            a = ang * math.pi / 4
+            mc(gx + math.cos(a) * 0.10 + ex * -0.0, gy + math.sin(a) * 0.10,
+               f"micro_{i}_{ang}")
+        # 边打边撤: 远离该敌方向
+        d = math.hypot(ex, ey) or 1e-6
+        mc(gx - ex / d * 0.15, gy - ey / d * 0.15, "kite_retreat_pressure")
+    # 6) 技术候选
+    if f["e_scr"]:
+        ne = min(f["e_scr"], key=lambda e: math.hypot(float(e[0]) - 0.5,
+                                                       float(e[1]) - 0.5))
+        d = math.hypot(float(ne[0]) - 0.5, float(ne[1]) - 0.5)
+        if d <= 0.32 and hp >= 0.6:
+            cands.append(({"type": "skill", "id": 2, "mode": "tap",
+                           "reason": "enemy_in_skill2_range"}, "hook"))
+        if d <= 0.40 and hp >= 0.6:
+            cands.append(({"type": "skill", "id": 1, "mode": "tap",
+                           "reason": "enemy_hero_near"}, "skill1"))
+        cands.append(({"type": "attack", "priority": "free", "reason":
+                       "engage_enemy"}, "attack"))
+    # 7) 清线(近敌兵): 朝最近敌兵方向 0.15
+    if f["e_min"]:
+        em = min(f["e_min"], key=lambda e: math.hypot(float(e[0]) - 0.5,
+                                                      float(e[1]) - 0.5))
+        dex, dey = float(em[0]) - 0.5, float(em[1]) - 0.5
+        dd = math.hypot(dex, dey) or 1e-6
+        mc(gx + dex / dd * 0.15, gy + dey / dd * 0.15, "clear_lane")
+    # 8) 撤退(低血) & 原地
+    if hp < 0.6:
+        mc(0.90, 0.90 if gx >= 0.5 else 0.10,
+           "retreat_low_hp_map") if False else mc(
+            0.90, 0.90, "retreat_low_hp_map") if gx > 0.4 else mc(0.10, 0.10,
+                                                                  "retreat_low_hp_map")
+    cands.append(({"type": "none", "reason": "stand"}, "stand"))
+    return cands
+
+
+def evaluate(c, f, camp="blue"):
+    """候选价值: 数值计算(<3us)。"""
+    a = c[0]
+    t = a.get("type")
+    gx, gy = f["g"]
+    v = 0.0
+    if t == "map_move":
+        nx, ny = a.get("nx", 0.5), a.get("ny", 0.5)
+        d_red = min([math.hypot(nx - p[0], ny - p[1]) for p in f["reds"]], default=9.9)
+        if d_red < 0.12:
+            v += _W["w_win"] * _W["k_win_enemy"]
+        n_red_near = sum(1 for p in f["reds"] if math.hypot(nx - p[0], ny - p[1]) < 0.15)
+        v -= _W["w_risk"] * (0.5 if n_red_near >= 3 else (0.25 if n_red_near == 2 else 0.0))
+        d_blue = min([math.hypot(nx - p[0], ny - p[1]) for p in f["blues"]], default=9.9)
+        if d_blue < 0.10:
+            v += _W["w_safe"] * 0.5
+        for cxy, k in (((0.75, 0.75), 1.0), ((0.5, 0.58), 0.9)):
+            if camp == "red":
+                cxy = (1 - cxy[0], 1 - cxy[1])
+            if math.hypot(nx - cxy[0], ny - cxy[1]) <= 0.28:
+                v += _W["w_map"] * k
+        d_self = math.hypot(nx - gx, ny - gy)
+        if d_self > 0.5 and f["hp"] < 0.8:
+            v -= 0.8
+        # 蹲草标记加分(短距离安全点)
+        if a.get("reason", "").startswith("hold_hook"):
+            v += _W["w_hold"]
+        elif a.get("reason", "").startswith("micro"):
+            v += _W["w_micro"] - d_self * 0.5
+        elif a.get("reason", "").startswith("kite"):
+            v += _W["w_safe"] * 0.6
+    elif t == "skill" and a.get("id") == 2:
+        v += _W["w_skill"] * _W["k_win_enemy"]
+    elif t == "skill" and a.get("id") == 1:
+        v += _W["w_skill"] * 0.8
+    elif t == "attack":
+        v += _W["w_skill"] * 0.4
+    return v
+
+
+def solve(state, fallback_action, hp, camp="blue", base_score=0.0):
+    """v2.42: 像素级密采样4096移动候选(向量化) + 战术候选枚举 -> 全局最优。
+        若移动最优分高 -> map_move(网格点); 否则与战术候选(技能/蹲/原地)比优。
+        全程 <2ms。异常回退 fallback。"""
+    try:
+        f = _feat(state, hp)
+        # v2.73 动作类型白名单: solve 只优化移动, 绝不覆盖技能/攻击/连招/回城/恢复
+        if fallback_action and fallback_action.get("type") in (
+                "skill", "attack", "combo", "recall", "restore", "none"):
+            return fallback_action
+        # v2.65 无敌人证据: 直接下放给规则决策(跟队/蹲草/撤退), 不做走廊乱转
+        if not f["reds"]:
+            return fallback_action
+        gx, gy, gv = _grid_best(f, camp)
+        cands = gen_candidates(f)
+        # v2.55 保命硬过滤: 敌群>=6 或 血<0.5 -> 只留 原地/跟队/蹲草/撤退(删support/技能/进攻)
+        if len(f["reds"]) >= 6 or hp < 0.5:
+            keep_prefix = ("stand", "follow", "hold", "retreat", "stand_")
+            cands = [c for c in cands
+                     if any(c[0].get("reason", "").startswith(p) for p in keep_prefix)
+                     or c[0].get("type") == "none"]
+        scored = [(evaluate(c, f, camp), c) for c in cands]
+        scored.sort(key=lambda x: -x[0])
+        # 战术候选最高分 vs 网格移动分
+        if scored and gv >= scored[0][0]:
+            return {"type": "map_move", "nx": max(0.02, min(0.98, gx)),
+                    "ny": max(0.02, min(0.98, gy)), "reason": "grid_best"}
+        if scored:
+            best = scored[0][1][0]
+            if best.get("type") == fallback_action.get("type") and \
+                    best.get("reason") == fallback_action.get("reason"):
+                return fallback_action
+            if scored[0][0] <= 0.0 and fallback_action.get("type") != "none":
+                return fallback_action
+            return best
+        return fallback_action
+    except Exception:
+        return fallback_action

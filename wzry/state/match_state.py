@@ -32,7 +32,7 @@ _MM_Y_NORM = 0.322
 # v2.13 判定阈值
 _GRAY_THR = 110.0     # ROI 平均灰度低于此 = 暗
 _GREEN_THR = 50       # ROI 内绿色像素（HSV H35-90,S>80,V>90）> 此 = 有绿色地图底
-_BLUE_MAX = 1000      # ROI 内蓝色像素 < 此（主页/选人蓝色导航栏 >1900）
+_BLUE_MAX = 6500      # v2.38 RAW增益适配: 对局小地图蓝(河道/水晶)数千, 主页导航栏蓝更深更密更广
 
 
 class MatchPhase(str, enum.Enum):
@@ -44,7 +44,7 @@ class MatchPhase(str, enum.Enum):
 
 class MatchStateMachine:
     def __init__(self, minimap_center_norm=None, minimap_r_norm=0.082,
-                 gray_thr=_GRAY_THR, min_dots=3, hold_frames=5, post_hold_s=5.0,
+                 gray_thr=_GRAY_THR, min_dots=3, hold_frames=90, post_hold_s=15.0,
                  green_thr=_GREEN_THR, blue_max=_BLUE_MAX):
         # minimap_center_norm 保留兼容旧调用（不再用于 ROI 定位，ROI 固定方形）
         self.gray_thr = gray_thr
@@ -78,7 +78,7 @@ class MatchStateMachine:
         B = roi[..., 0].astype(int)
         G = roi[..., 1].astype(int)
         R = roi[..., 2].astype(int)
-        blue = int(np.sum((B >= 150) & (B <= 255) & (G >= 60) & (G <= 150)
+        blue = int(np.sum((B >= 170) & (B <= 255) & (G >= 60) & (G <= 150)
                           & (R >= 30) & (R <= 120)))
         return gray < self.gray_thr, green, blue
 

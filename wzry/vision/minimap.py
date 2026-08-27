@@ -717,21 +717,23 @@ def draw_overlay(frame, result, show_labels=True):
     """在帧上叠加小地图圆盘与圆点，返回新图像（BGR）。"""
     out = frame.copy()
     if result.get("found") and result["center"]:
-        cx, cy, r = result["center"][0], result["center"][1], result["radius"]
+        cx, cy, r = int(result["center"][0]), int(result["center"][1]), int(result["radius"])
         cv2.circle(out, (cx, cy), r, (0, 255, 255), 2)
         cv2.circle(out, (cx, cy), 3, (0, 255, 255), -1)
-        colors = {"blue": (255, 128, 0), "red": (0, 0, 255), "yellow": (0, 255, 255)}
+        colors = {"blue": (255, 128, 0), "red": (0, 0, 255), "yellow": (0, 255, 255),
+                  "green": (0, 255, 0)}
         for color, pts in result["dots"].items():
+            ccol = colors.get(color, (200, 200, 200))
             for (nx, ny) in pts:
-                px = int((nx - 0.5) * 2 * r) + cx
-                py = int((ny - 0.5) * 2 * r) + cy
-                cv2.circle(out, (px, py), 4, colors[color], -1)
+                px = int(float(nx - 0.5) * 2 * r) + cx
+                py = int(float(ny - 0.5) * 2 * r) + cy
+                cv2.circle(out, (px, py), 4, ccol, -1)
                 if show_labels:
                     cv2.putText(out, color[0], (px + 5, py - 5),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, colors[color], 1, cv2.LINE_AA)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, ccol, 1, cv2.LINE_AA)
         for (nx, ny) in result["towers"]:
-            px = int((nx - 0.5) * 2 * r) + cx
-            py = int((ny - 0.5) * 2 * r) + cy
+            px = int(float(nx - 0.5) * 2 * r) + cx
+            py = int(float(ny - 0.5) * 2 * r) + cy
             cv2.circle(out, (px, py), 2, (255, 255, 255), -1)
         if show_labels:
             cv2.putText(out, f"minimap r={r}", (cx + r + 6, cy),

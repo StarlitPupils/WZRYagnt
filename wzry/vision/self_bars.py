@@ -27,6 +27,7 @@ import numpy as np
 BRIGHT_V = 140          # 血条高亮
 BAR_W_MIN, BAR_W_MAX = 25, 150
 BAR_H_MAX = 10
+BAR_H_MIN = 5           # v2.36 野怪/小怪血条很细(1-4px), 英雄血条粗(5-9px) -> 下限过滤
 BAR_AREA_MIN = 40
 # HUD 排除区（右侧 UI、顶部 HUD、底部技能栏）
 EXCLUDE_X = 1230
@@ -36,6 +37,39 @@ EXCLUDE_Y_BOTTOM = 660
 # 自己英雄搜索区（中央偏下）
 HERO_REGION = (500, 300, 800, 550)
 MIN_HERO_AREA = 300
+
+
+def hero_bar_check(frame, cx, cy, half_w=60, y_span=40):
+    """v2.75 敌英血条厚度校验: (cx,cy)附近找红条, 返回最高条高(px)。
+    >=BAR_H_MIN(5)=英雄; 1-4px=野怪/小兵 -> 由调用方剔除。无条返回 None。"""
+    try:
+        x0 = max(0, int(cx) - half_w)
+        x1 = min(frame.shape[1], int(cx) + half_w)
+        y0 = max(0, int(cy))
+        y1 = min(frame.shape[0], int(cy) + y_span)
+        roi = frame[y0:y1, x0:x1]
+        if roi.size == 0:
+            return None
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        S, V = hsv[..., 1].astype(int), hsv[..., 2].astype(int)
+        m = ((S > 60) & (V > 100)).astype(np.uint8)
+        n, lab, st, _ = cv2.connectedComponentsWithStats(m, 8)
+        best = None
+        for i in range(1, n):
+            x, y, w2, h2, area = st[i]
+            # 红条: 宽 10-200, 高 1-12, 长宽比>=3(横条), 红色(R>G*1.4)
+            if not (10 <= w2 <= 200 and 1 <= h2 <= 12 and w2 >= 3 * h2):
+                continue
+            seg = roi[y:y + h2, x:x + w2]
+            rmean = float(seg[..., 2].mean())
+            gmean = float(seg[..., 1].mean())
+            if rmean < gmean * 1.3:
+                continue
+            if best is None or h2 > best:
+                best = h2
+        return best
+    except Exception:
+        return None
 
 # v2.13 血条标定（1280x720）：头顶血条满条宽 ~115px（标注帧 90-123 中位）
 FULL_BAR_W = 115.0
@@ -55,7 +89,7 @@ def _find_bars(frame, hue_cond, label):
     for i in range(1, n):
         w_, h_ = st[i, cv2.CC_STAT_WIDTH], st[i, cv2.CC_STAT_HEIGHT]
         area = st[i, cv2.CC_STAT_AREA]
-        if not (BAR_W_MIN <= w_ <= BAR_W_MAX and h_ <= BAR_H_MAX
+        if not (BAR_W_MIN <= w_ <= BAR_W_MAX and BAR_H_MIN <= h_ <= BAR_H_MAX
                 and area >= BAR_AREA_MIN):
             continue
         lx, ly = int(cent[i][0]), int(cent[i][1])
@@ -103,7 +137,77 @@ def detect_all_bars(frame):
     return result
 
 
-def _find_bar(head_roi, hue_cond):
+def find_color_bars(frame, is_col, y_top=70, y_bot=635, x_max=1230,
+                    wmin=25, wmax=150, gap=9, exclude_mm=True, thick_min=4, thick_max=14):
+    """找指定颜色的分段血条（刻度将条切成多段 → 行内 gap 合并 + 行间堆叠成条）。
+
+    返回 [{x0, x1, y, w, cx}]，y 为条顶部行，w 为最大行宽。
+    v2.36: thick 过滤——野怪/小怪血条很细(2-3px), 英雄血条较粗(5-9px)
+           条厚 < thick_min 或 > thick_max 的条剔除(野怪白给, 英雄误杀).
+    排除：小地图区(x<245,y<245)、右上/右下 UI(x>=x_max)、底部(y>y_bot)。
+    """
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    H, S, V = hsv[..., 0].astype(int), hsv[..., 1].astype(int), hsv[..., 2].astype(int)
+    mask = is_col(H, S, V).astype(np.uint8)
+    rows = []  # (y, x0, x1)
+    for y in range(y_top, y_bot):
+        if exclude_mm:
+            row = mask[y, :x_max].copy()
+            if y < 245:
+                row[:245] = 0
+        else:
+            row = mask[y, :x_max]
+        idx = np.nonzero(row)[0]
+        if len(idx) < wmin // 2:
+            continue
+        groups = []
+        start = prev = idx[0]
+        for i in idx[1:]:
+            if i - prev > gap:
+                if prev - start + 1 >= wmin:
+                    groups.append((start, prev))
+                start = i
+            prev = i
+        if prev - start + 1 >= wmin:
+            groups.append((start, prev))
+        for g0, g1 in groups:
+            if g1 - g0 + 1 <= wmax:
+                rows.append((y, int(g0), int(g1)))
+    if not rows:
+        return []
+    # 行间堆叠：y 差<=2 且 x 区间重叠 -> 同一条
+    rows.sort()
+    bars = []
+    for y, x0, x1 in rows:
+        placed = False
+        for b in bars:
+            if y - b["yb"] <= 2 and not (x1 < b["x0"] - 10 or x0 > b["x1"] + 10):
+                b["yb"] = y
+                b["x0"] = min(b["x0"], x0)
+                b["x1"] = max(b["x1"], x1)
+                placed = True
+                break
+        if not placed:
+            bars.append({"y": y, "yb": y, "x0": x0, "x1": x1})
+    out = []
+    for b in bars:
+        w = b["x1"] - b["x0"] + 1
+        thick = b["yb"] - b["y"] + 1
+        if w < wmin or thick < thick_min or thick > thick_max:
+            continue
+        out.append({"x0": b["x0"], "x1": b["x1"], "y": b["y"],
+                    "w": w, "cx": (b["x0"] + b["x1"]) // 2, "thick": thick})
+    return out
+
+
+def find_ally_bars(frame):
+    """队友蓝条（分段合并版）。"""
+    return find_color_bars(frame, lambda H, S, V: (H >= 90) & (H <= 135) & (S > 55) & (V > 60))
+
+
+def find_enemy_bars(frame):
+    """敌人红条（分段合并版）。"""
+    return find_color_bars(frame, lambda H, S, V: ((H <= 15) | (H >= 165)) & (S > 60) & (V > 60))
     """在头顶区域找指定色相的横条，返回 (ratio, 条长, 区域宽)。
 
     v2.13：改用连通域找最长水平条（逐行 run 对血条渐变/缺口不鲁棒）。
@@ -168,15 +272,27 @@ def self_hp_mp(frame):
     hp = min(1.0, bw / FULL_BAR_W)
     hero_pos = (bx, by + HERO_BAR_GAP)
 
-    # MP：绿条正下方 3-25px，同 x ±45px
+    # MP：绿条正下方 3-25px。蓝条左端与 HP 条左端对齐、填充连续；
+    # 用"最右蓝色列位置"换算抗遮挡（金币飘字/血条被截断时左段法会低估）
     mp = None
     y0 = max(0, by + 3)
-    y1 = min(h, by + 25)
+    y1 = min(h, by + 27)
     if y1 > y0:
-        sub = frame[y0:y1, max(0, bx - 45):min(w, bx + 45)]
-        mp, mp_len, _w, _c = _find_bar(sub, is_blue)
-        if mp is not None and mp_len < 20:
-            mp = None
+        bar_left = bx - bw // 2
+        x_lo = max(0, bar_left - 2)
+        x_hi = min(w, bar_left + int(FULL_BAR_W) + 4)
+        if x_hi > x_lo:
+            sub = frame[y0:y1, x_lo:x_hi]
+            hsv2 = cv2.cvtColor(sub, cv2.COLOR_BGR2HSV)
+            H2, S2, V2 = hsv2[..., 0].astype(int), hsv2[..., 1].astype(int), hsv2[..., 2].astype(int)
+            m2 = ((H2 >= 90) & (H2 <= 135) & (S2 > 60) & (V2 > 60))
+            cols = m2.any(axis=0)
+            if cols.any():
+                last = int(np.nonzero(cols)[0].max())
+                if last >= 12:
+                    mp = min(1.0, (last + 1) / FULL_BAR_W)
+                else:
+                    mp = None
     if hp is not None and bw < 25:
         hp = None
     return hp, mp, hero_pos

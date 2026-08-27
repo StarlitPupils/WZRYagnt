@@ -59,6 +59,11 @@ class ActionExecutor:
         """松开摇杆（同点 1ms swipe）。"""
         return self.ex.swipe(self.cx, self.cy, self.cx, self.cy, 1, source="policy")
 
+    # ---------- 小地图点击移动（v2.27 王者辅助移动）----------
+    def tap(self, x: int, y: int, source: str = "policy"):
+        """点击设备像素坐标（小地图目标点→自动寻路）。"""
+        return self.ex.tap(x, y, source=source)
+
     # ---------- 技能 ----------
     def skill_cast(self, skill_id: int, mode: str = "tap", target=None, duration: int = 150):
         """技能释放。
