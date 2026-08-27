@@ -541,8 +541,20 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             _down_c = (0.75, 0.72) if _camp0 == "blue" else (0.25, 0.28)
             _mid_c = (0.5, 0.58) if _camp0 == "blue" else (0.5, 0.42)
             na = nearest(allies)
-            if not in_opening and mm_red and hp >= _u_eng_hp:
-                # 鏀彺: 涓嬭矾璧板粖绾偣浼樺厛(鈮0%), 涓矾璧板粖绾偣娆箣(鈮0%); 鍏朵綑(涓婅矾绛涓嶈窇
+            # v3.2 支援=跟随队友(用户铁律): 小地图红点不可作为支援目标(检测不准);
+            #      队友蓝点在身边(走廊内/任意)就去队友处; 只有完全无蓝点才考虑走廊红点支援
+            if not in_opening and mm_blue:
+                self_g = (mm.get("dots") or {}).get("green") or []
+                myx, myy = self_g[0] if self_g else (0.5, 0.5)
+                _down_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
+                _mid_blue = [p for p in mm_blue if _corridor(p, _mid_c, 0.35)]
+                _pool_b = _down_blue or _mid_blue or mm_blue
+                _trb = min(_pool_b, key=lambda p: (p[0]-myx) ** 2 + (p[1]-myy) ** 2)
+                target = (_trb[0], _trb[1])
+                reason = "support_ally_engaged" if (_corridor(_trb, _down_c, 0.35)
+                                                    or _corridor(_trb, _mid_c, 0.35)) else "follow_ally_minimap"
+            elif not in_opening and mm_red and hp >= _u_eng_hp:
+                # 无任何队友蓝点 -> 走廊红点支援(发育路/中路), 河道红点不去
                 self_g = (mm.get("dots") or {}).get("green") or []
                 myx, myy = self_g[0] if self_g else (0.5, 0.5)
                 _down_reds = [p for p in mm_red if _corridor(p, _down_c)]
@@ -551,24 +563,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 tr = min(_pool, key=lambda p: (p[0] - myx) ** 2 + (p[1] - myy) ** 2) \
                     if _pool else None
                 d_red = math.hypot(tr[0] - myx, tr[1] - myy) if tr else 9.9
-                # (comment)
-                target_ally_fight = None
-                for bp in mm_blue:
-                    if not (_corridor(bp, _down_c, 0.35) or _corridor(bp, _mid_c, 0.35)):
-                        continue
-                    for rp in mm_red:
-                        if (bp[0] - rp[0]) ** 2 + (bp[1] - rp[1]) ** 2 < 0.12 ** 2:
-                            target_ally_fight = bp
-                            break
-                    if target_ally_fight:
-                        break
-                if target_ally_fight is not None:
-                    target = (target_ally_fight[0], target_ally_fight[1])
-                    reason = "support_ally_engaged"
-                elif tr is not None and d_red < 0.30:
-                    target = (tr[0], tr[1])
-                    reason = "support_red_nearest"
-                elif tr is not None and d_red < 0.60 and not mm_blue:
+                if tr is not None and d_red < 0.60:
                     target = (tr[0], tr[1])
                     reason = "support_red_nearest"
                 else:
@@ -615,6 +610,18 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 lx, ly = lane
                 target = (lx, ly)
                 reason = "lane_develop"
+    # v3.2 用户兜底铁律: 决策不明时跟随队友去清兵线(不空转/不河道游荡)
+    if reason == "lane_develop" or reason == "lane_develop_hold":
+        if ally_minions:
+            _am = min(ally_minions, key=lambda s: dist_width(s[0], s[1]))
+            target = (_am[0], _am[1])
+            reason = "follow_ally_clearlane"
+        elif mm_blue:
+            _sgf = (mm.get("dots") or {}).get("green") or []
+            _fx, _fy = _sgf[0] if _sgf else (0.5, 0.5)
+            _nbf = min(mm_blue, key=lambda p: (p[0]-_fx)**2 + (p[1]-_fy)**2)
+            target = (_nbf[0], _nbf[1])
+            reason = "follow_ally_minimap"
     if target is None:
         return {"type": "none", "reason": "no_target"}
     # v2.7 鐩爣婊炲洖氳摑鐐瑰櫔澹板鑷寸洰鏍囨瘡甯烦鍙-> 鐩爣闇绋冲畾 HOLD_S 绉掓墠鍒囨崲
@@ -646,7 +653,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                   "support_red_nearest_hold", "support_ally_engaged_hold",
                   "lane_develop_path", "follow_ally_lowhp_hold",
                   "follow_ally_minimap_path", "support_red_nearest_path",
-                  "support_ally_engaged_path", "lane_develop_hold"):
+                  "support_ally_engaged_path", "lane_develop_hold",
+                  "follow_ally_clearlane", "follow_ally"):
         return {"type": "map_move", "nx": max(0.02, min(0.98, target[0])),
                 "ny": max(0.02, min(0.98, target[1])), "reason": reason}
     # dual-track movement
@@ -1194,39 +1202,50 @@ def main():
                 except Exception:
                     pass
 
-            # ---- 寮灞闃佃惀鍒柇 v2.22堣嚜宸辩豢鐐瑰嚭鐢熻鍒畾, 娉夋按鑹蹭粎鍏滃簳---
-            # v2.99 铁律: 阵营未定不锁死不默认蓝方! 依次尝试:
-            #   ① 小地图自己绿点(基地角落): 右下=蓝, 左上=红 (最可靠)
-            #   ② 小地图右下/左上角落水晶色强弱 (蓝方右下蓝水晶偏蓝)
-            #   ③ 屏幕中心泉水ROI (兜底, 仍不判即下帧继续, 直到判对才走发育路)
+            # ---- 寮灞闃佃惀鍒柇 v3.2: 多帧投票制(单帧易误判->红方被送对抗路) ----
+            # 票源: ① 小地图自已绿点基地角落(右下=蓝 左上=红) 权重2 ② 小地图角落水晶色 权重1
+            #   ③ 屏幕中心泉水ROI 权重1; 连续投票多数>=3 才锁; 锁前一律走发育路中立方向等待
             if not cooldowns.get("camp"):
-                camp = None
-                greens = (mm.get("dots") or {}).get("green") or []
-                if greens:
-                    gx, gy = greens[0]
-                    # 钃濇柟娉忓湴鍥惧彸涓 绾柟娉宸笂
-                    camp = "blue" if (gx > 0.35 and gy > 0.35) else "red"
-                else:
-                    # 小地图角落水晶蓝度: 蓝方右下角水晶(蓝, B>R), 红方左上角水晶偏红
+                _votes = cooldowns.setdefault("camp_votes", {"blue": 0, "red": 0})
+                _vote_t = float(cooldowns.get("camp_vote_t", 0.0))
+                if now - _vote_t > 0.4:   # 0.4s 采样间隔
+                    cooldowns["camp_vote_t"] = now
+                    _cand = None
+                    greens = (mm.get("dots") or {}).get("green") or []
+                    if greens:
+                        gx, gy = greens[0]
+                        # 蓝方基地小地图右下 / 红方基地左上
+                        _cand = "blue" if (gx > 0.35 and gy > 0.35) else "red"
+                        _votes[_cand] = _votes.get(_cand, 0) + 2
                     try:
                         _mm0 = frame[0:232, 0:232]
                         _br = _mm0[176:232, 176:232].reshape(-1, 3).mean(axis=0)
                         _tl = _mm0[0:56, 0:56].reshape(-1, 3).mean(axis=0)
+                        _cand2 = None
                         if _br[0] > _br[2] * 1.05 and _br[0] > _tl[0]:
-                            camp = "blue"
+                            _cand2 = "blue"
                         elif _tl[2] > _tl[0] * 1.05 and _tl[2] > _br[2]:
-                            camp = "red"
+                            _cand2 = "red"
+                        if _cand2:
+                            _votes[_cand2] = _votes.get(_cand2, 0) + 1
                     except Exception:
                         pass
-                if camp is None:
-                    from wzry.vision.camp import detect_camp_from_center
-                    camp = detect_camp_from_center(frame)
-                if camp:
+                    if _cand is None:
+                        from wzry.vision.camp import detect_camp_from_center
+                        _cand3 = detect_camp_from_center(frame)
+                        if _cand3:
+                            _votes[_cand3] = _votes.get(_cand3, 0) + 1
+                _bv = int(_votes.get("blue", 0))
+                _rv = int(_votes.get("red", 0))
+                if max(_bv, _rv) >= 4 and _bv != _rv:
+                    camp = "blue" if _bv > _rv else "red"
                     cooldowns["camp"] = camp
-                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: {'蓝方' if camp == 'blue' else '红方'} "
+                    cooldowns.pop("camp_votes", None)
+                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: {'蓝方' if camp == 'blue' else '红方'}"
+                          f"(票 蓝{_bv}/红{_rv}) "
                           f"→ 发育路方向 {LANE_DIR_BLUE if camp == 'blue' else LANE_DIR_RED}")
                 else:
-                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 未定(继续采样, 不默认!)")
+                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 采样中(蓝{_bv}/红{_rv}), 未锁")
 
             # ---- 寮灞闃靛璇嗗埆坴2.10歮odlens 璇婚夎嫳闆勭晫闈枃瀛楋紝鍚挓棣椾晶=鎴戞柟---
             # 鐢悗鍙扮嚎绋嬮伩鍏嶉樆濉炰富寰幆涚粨鏋滃瓨鍏cooldowns["roster"]
