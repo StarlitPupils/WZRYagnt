@@ -1138,14 +1138,47 @@ def main():
             except Exception:
                 pass
             if phase != MatchPhase.IN_MATCH:
-                # v3.4 用户铁律: 选人界面自己在上排=蓝方/下排=红方(等进游戏前先记阵营)
-                #   检测: 上排名牌带(y90-165) 与 下排名牌带(y480-560) 白色高亮文字像素,
-                #   哪排有"Starliit-001"白色名牌(另一排是敌方黑名牌) -> 自己在那排
-                if not cooldowns.get("camp_row_stale", True) is False:
-                    pass
-                # v3.9 选人页像素判阵营已移除: 大厅/主页/英雄列表都是蓝白调文字带,
-                #   任何色带/名牌门控都会误判(实测多次锁错)。阵营由开局绿点(基地角)主导:
-                #   v3.4 绿点票*3(最强)+蓝点票*1(辅助); 水晶/泉水色仅参考不参与锁定。
+                # v4.0 用户唯一权威判法: 选完英雄界面, 我的名字(金色 Starliit-001)在
+                #   上排=蓝方 / 下排=红方。金色=玩家名牌专用色(H12-42 S>110 V>140),
+                #   大厅/结算蓝色调无此金色带 -> 不再被骗。x 限 360-880 排除右侧金饰。
+                try:
+                    _hsvG = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                    _HG = _hsvG[..., 0].astype(int)
+                    _SG = _hsvG[..., 1].astype(int)
+                    _VG = _hsvG[..., 2].astype(int)
+                    _goldm = (_HG >= 12) & (_HG <= 42) & (_SG > 110) & (_VG > 140)
+                    _gold_cnt = int(_goldm[:, 360:880].sum())
+                    if _gold_cnt > 120:
+                        _gold_y = np.nonzero(_goldm[:, 360:880])[0]
+                        _cnt_up = int(((_gold_y >= 40) & (_gold_y < 300)).sum())
+                        _cnt_lo = int(((_gold_y >= 400) & (_gold_y < 680)).sum())
+                        if _cnt_up >= 80 and _cnt_up >= _cnt_lo * 2:
+                            _row_lock = "blue"
+                        elif _cnt_lo >= 80 and _cnt_lo >= _cnt_up * 2:
+                            _row_lock = "red"
+                        else:
+                            _row_lock = None
+                    else:
+                        _row_lock = None
+                except Exception:
+                    _row_lock = None
+                if _row_lock:
+                    _prev_g = cooldowns.get("gold_row_prev")
+                    _g_streak = int(cooldowns.get("gold_row_streak", 0))
+                    if _prev_g == _row_lock:
+                        _g_streak += 1
+                    else:
+                        _g_streak = 1
+                    cooldowns["gold_row_prev"] = _row_lock
+                    cooldowns["gold_row_streak"] = _g_streak
+                    if _g_streak >= 3 and not cooldowns.get("camp"):
+                        cooldowns["camp"] = _row_lock
+                        cooldowns.pop("camp_votes", None)
+                        print(f"[{datetime.now():%H:%M:%S}] 阵营判断(金名牌3帧): "
+                              f"{'蓝方' if _row_lock == 'blue' else '红方'} → "
+                              f"发育路方向 {LANE_DIR_BLUE if _row_lock == 'blue' else LANE_DIR_RED}")
+                else:
+                    cooldowns["gold_row_streak"] = 0
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
                     _async_result_detect(frame, reward)
