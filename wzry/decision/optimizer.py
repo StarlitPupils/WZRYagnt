@@ -90,7 +90,9 @@ def _grid_best(f, camp="blue"):
         _reds_corridor = [p for p in f["reds"]
                           if min(math.hypot(p[0] - _down_c[0], p[1] - _down_c[1]),
                                  math.hypot(p[0] - _mid_c[0], p[1] - _mid_c[1])) <= 0.32]
-        reds_use = _reds_corridor or f["reds"]
+        # v2.91 支持路线硬约束: 走廊外红点(上路/河道)不进攻击场 -> 只进规避场
+        reds_use = _reds_corridor
+        reds_dodge = [p for p in f["reds"] if p not in reds_use]
         rx = np.array([p[0] for p in reds_use])
         ry = np.array([p[1] for p in reds_use])
         d_red = np.sqrt((GX[..., None] - rx) ** 2 + (GY[..., None] - ry) ** 2).min(axis=-1)
@@ -99,6 +101,12 @@ def _grid_best(f, camp="blue"):
             n_near = ((np.sqrt((GX[..., None] - rx) ** 2 + (GY[..., None] - ry) ** 2) < 0.15)
                       .sum(axis=-1))
             V -= _W["w_risk"] * (0.5 * (n_near >= 3) + 0.25 * (n_near == 2))
+        if reds_dodge:
+            # 走廊外红点=威胁不支援: 压接近分(不进河/不进上路团)
+            rx2 = np.array([p[0] for p in reds_dodge])
+            ry2 = np.array([p[1] for p in reds_dodge])
+            d_dodge = np.sqrt((GX[..., None] - rx2) ** 2 + (GY[..., None] - ry2) ** 2).min(axis=-1)
+            V -= _W["w_risk"] * 0.9 * np.exp(-d_dodge / 0.10)
     if f["blues"]:
         bx = np.array([p[0] for p in f["blues"]])
         by = np.array([p[1] for p in f["blues"]])

@@ -41,8 +41,8 @@ HOOK_CONFIRM_S = 1.0
 HOOK_DIST_SHRINK = 0.72
 MOVE_R = 0.8
 MOVE_DURATION_MS = 450
-LANE_DIR_BLUE = (0.5, 0.5)
-LANE_DIR_RED = (0.5, 0.5)
+LANE_DIR_BLUE = (0.75, 0.72)   # v2.91: 发育路中心(蓝方右下), 旧(0.5,0.5)=地图中心=河道! 用户: 别待河道
+LANE_DIR_RED = (0.25, 0.28)    # v2.91: 发育路中心(红方左上镜像)
 DANGER_FRAC = 0.45
 # 宸辨柟娉夋按鏂瑰悜堝皬鍦板浘鍧愭爣夛細钃濇柟宸笅 / 绾柟鍙充笂堥暅鍍忥級
 FOUNTAIN_DIR_BLUE = (0.12, 0.88)
@@ -588,11 +588,17 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 # 璺熼槦鐩爣: 涓嬭矾璧板粖钃濈偣浼樺厛(勬墜), 娆￠変腑璺 璐績(闃插崟鐐逛吉妫)
                 _down_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
                 _mid_blue = [p for p in mm_blue if _corridor(p, _mid_c, 0.35)]
-                _pool_b = _down_blue or _mid_blue or mm_blue
-                lx = sum(p[0] for p in _pool_b) / len(_pool_b)
-                ly = sum(p[1] for p in _pool_b) / len(_pool_b)
-                target = (lx, ly)
-                reason = "follow_ally_minimap"
+                # v2.91 河道/上路蓝点不跟随(支援路线硬约束: 只中/下), 无走廊蓝点则去发育路
+                _pool_b = _down_blue or _mid_blue
+                if not _pool_b:
+                    lx, ly = lane
+                    target = (lx, ly)
+                    reason = "lane_develop_hold"
+                else:
+                    lx = sum(p[0] for p in _pool_b) / len(_pool_b)
+                    ly = sum(p[1] for p in _pool_b) / len(_pool_b)
+                    target = (lx, ly)
+                    reason = "follow_ally_minimap"
             else:
                 lx, ly = lane
                 target = (lx, ly)
@@ -1241,6 +1247,23 @@ def main():
                 yolo_count = 0
                 cached_dets = det.detect(frame)
             dets = list(cached_dets)
+            # v2.91 野怪互斥(源头): neutral_monster 框边距20px内重叠的 enemy_hero = 误标野怪 -> 剔除;
+            #    低置信 enemy_hero (0.35-0.55) 且无 monster 佐证也有风险, 置信门槛 0.55 放行
+            try:
+                _mon_b = [(d.xyxy[0], d.xyxy[1], d.xyxy[2], d.xyxy[3])
+                          for d in dets if d.cls == "neutral_monster"]
+                if _mon_b:
+                    def _near_mon(d):
+                        cx, cy = d.center[0], d.center[1]
+                        for (mx0, my0, mx1, my1) in _mon_b:
+                            if cx >= mx0 - 20 and cx <= mx1 + 20 \
+                                    and cy >= my0 - 20 and cy <= my1 + 20:
+                                return True
+                        return False
+                    dets = [d for d in dets
+                            if not (d.cls == "enemy_hero" and _near_mon(d))]
+            except Exception:
+                pass
             # hero identity bar-top color guard
             try:
                 _hsv0 = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -1286,7 +1309,25 @@ def main():
             state_dict = st.to_dict()
             # v2.65 鏁岃嫳寮哄埗娉叆 (涓嶄緷璧build/filter: dets 绾殑鏁岃嫳蹇呰繘 units)
             try:
-                _de = [d for d in dets if d.cls == "enemy_hero"]
+                # v2.91 野怪互斥: neutral_monster 框与 enemy_hero 框重叠(IoU>0.15/中心距<40px)
+                #     -> 该 enemy_hero 实为野怪(yolo 常把野猪/龙误标 enemy_hero 0.35-0.55)
+                _mon_b = []
+                for _d in dets:
+                    if _d.cls == "neutral_monster":
+                        _mon_b.append((_d.xyxy[0], _d.xyxy[1], _d.xyxy[2], _d.xyxy[3]))
+                def _overlaps_monster(_d):
+                    if not _mon_b:
+                        return False
+                    _cx, _cy = _d.center[0], _d.center[1]
+                    _w2, _h2 = (_d.xyxy[2] - _d.xyxy[0]) / 2.0 + 15, (_d.xyxy[3] - _d.xyxy[1]) / 2.0 + 15
+                    for (mx0, my0, mx1, my1) in _mon_b:
+                        if abs(_cx - (mx0 + mx1) / 2) < _w2 + (mx1 - mx0) / 2 \
+                                and abs(_cy - (my0 + my1) / 2) < _h2 + (my1 - my0) / 2:
+                            return True
+                    return False
+                _de = [d for d in dets if d.cls == "enemy_hero"
+                       and d.conf >= 0.55        # v2.91 敌英置信下限(野怪误标通常 0.35-0.52)
+                       and not _overlaps_monster(d)]
                 if _de and not any(u.get("cls") == "enemy_hero" for u in state_dict["units"]):
                     for _d in _de:
                         state_dict["units"].append({
@@ -1307,7 +1348,17 @@ def main():
                     _bh = hero_bar_check(frame, _cx, _cy)
                     if _bh is None or _bh < 5:
                         continue          # 鏃犳潯/钖勬潯=閲庢垨璇, 鍓旈櫎(涓嶆墦浜
-                    _kept_u.append(_u)
+                    if _bh >= 9:
+                        _kept_u.append(_u)   # 条厚>=9px=英雄(野怪条通常<=8px, 但龙/暴君更粗
+                    else:
+                        # v2.91 薄条(5-8px)需二次证据: 小地图同侧有红点或 yolo 置信>=0.85
+                        _mm_red_u = ((mm.get("dots") or {}).get("red") or [])
+                        _hi_c = any(
+                            (abs(d.center[0] / w - _s[0]) < 0.30 and
+                             abs(d.center[1] / h - _s[1]) < 0.30 and d.conf >= 0.85)
+                            for d in dets if d.cls == "enemy_hero")
+                        if _hi_c or _mm_red_u:
+                            _kept_u.append(_u)
                 state_dict["units"] = _kept_u
             except Exception:
                 pass
