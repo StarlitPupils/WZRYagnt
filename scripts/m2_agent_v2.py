@@ -546,7 +546,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 else:
                     target = None
             if target is None and not in_opening and mm_red and hp < _u_eng_hp:
-                # 浣庤涓嶆帴鍥 璺熼槦鍙                na_tmp = nearest(allies)
+                # low hp: follow ally
+                na_tmp = nearest(allies)
                 if na_tmp is not None:
                     target = (na_tmp[0], na_tmp[1])
                     reason = "follow_ally_lowhp"
