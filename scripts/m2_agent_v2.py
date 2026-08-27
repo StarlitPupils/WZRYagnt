@@ -1054,6 +1054,13 @@ def main():
         self_check.start()
     except Exception:
         self_check = None
+    # v2.83 行为习惯学习器(对面/队友/自己)
+    try:
+        from wzry.learning.behavior_mine import BehaviorMiner
+        behavior_miner = BehaviorMiner()
+        behavior_miner.start()
+    except Exception:
+        behavior_miner = None
     n_ticks = 0
     n_actions = 0
     infer_sum = 0.0
@@ -1521,6 +1528,12 @@ def main():
                 if self_check is not None:
                     self_check.feed(vis_out, dets,
                                     ui=(state_dict.get("ui") or {}))
+            except Exception:
+                pass
+            # v2.83 局内行为习惯学习(对面/队友/自己)
+            try:
+                if behavior_miner is not None:
+                    behavior_miner.feed(mm.get("dots") or {})
             except Exception:
                 pass
 
