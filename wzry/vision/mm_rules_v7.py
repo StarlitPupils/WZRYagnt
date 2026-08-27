@@ -397,9 +397,11 @@ class MMDetectorV7:
         # monsters with visible yellow dot kept only (simplify: all fixed)
         in_match_evidence = bool(res["self"] or res["ally"] or res["enemy"]
                                  or minions_ally or minions_enemy)
-        self_r = res["self"][:2]
-        ally_r = res["ally"][:6]
-        enemy_r = res["enemy"][:6]
+        # v3.3 用户铁律: 5v5 上限 = 敌英最多5, 队友最多4(自己1) -> 按置信度截断
+        _sort_k = lambda pts: sorted(pts, key=lambda q: -float(q[2]) if len(q) > 2 else 0.0)
+        self_r = _sort_k(res["self"])[:1]
+        ally_r = _sort_k(res["ally"])[:4]
+        enemy_r = _sort_k(res["enemy"])[:5]
 
         def norm(pts):
             return [{"n": [round(p[0] / mw, 4), round(p[1] / mh, 4)],

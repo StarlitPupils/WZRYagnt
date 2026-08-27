@@ -44,6 +44,7 @@ class MMTrackerV7:
     def __init__(self):
         self.det = MMDetectorV7()
         self._last_mm = None   # v2.90 最近小地图裁剪(输出点重闸用)
+        self._last_self = None # v3.3 上帧自己位置(缓慢移动闸)
         self.tracks = {"self": {}, "ally": {}, "enemy": {}}
         self.minion_tracks = {"ally": {}, "enemy": {}}
         self.frame_no = 0
@@ -128,9 +129,17 @@ class MMTrackerV7:
                     out.append((hx, hy, t.conf))
                 else:
                     out.append((t.x, t.y, t.conf))
-        if cls == "self" and len(out) > 1:
-            # 自己唯一：每帧仅一个(角饰等静态伪环以低置信轨道存在但永不输出)
+        if cls == "self" and out:
+            # v3.3 用户铁律: 自己位置只做缓慢小幅移动, 大幅跳跃=误检 -> 输出前与上帧自位对比
+            #   self_jump_max_px: 小地图232px, 英雄移速极慢; 单帧(6Hz)跳跃>25px 即误检
             out = sorted(out, key=lambda p: -p[2])[:1]
+            if self._last_self is not None:
+                _dd = math.hypot(out[0][0] - self._last_self[0],
+                                 out[0][1] - self._last_self[1])
+                if _dd > 25.0:
+                    # 跳变: 保留旧位(预测=旧位), 不污染
+                    out[0] = (self._last_self[0], self._last_self[1], 
+                              min(out[0][2], 0.35))
         elif cls == "ally" and out:
             # v2.45 我方英雄稳定: ① 不与"自己"重叠(>0.03) ② 两两高并(>0.02 距)
             selfs = self._hero_result_inner("self")
@@ -219,6 +228,9 @@ class MMTrackerV7:
                      for d in r["dots"][cls]]
             self._update_heroes(cls, cands)
         heroes = {cls: self._hero_result(cls) for cls in ("self", "ally", "enemy")}
+        if heroes["self"]:
+            self._last_self = (heroes["self"][0][0], heroes["self"][0][1])
+        # else: 保留旧 _last_self (漏检帧不清零, 防止新位置突然出现被放行)
 
         # 小兵点时序（伪点静止过滤）
         for cls in ("ally", "enemy"):
@@ -226,12 +238,14 @@ class MMTrackerV7:
         minions = {cls: self._minion_result(cls) for cls in ("ally", "enemy")}
 
         # ---- 兼容旧接口: 蓝=队友 红=敌人 绿=自己 黄=野怪 ----
-        # v2.87: 红点按置信度取前5(5v5上限, 防轨迹堆积幽灵红点, 旧无cap -> map red 7)
+        # v3.3 用户铁律: 5v5 上限 = 敌英最多5, 队友最多4(自己1) -> 按置信度截断
         heroes_enemy = sorted(heroes["enemy"], key=lambda p: -p[2])[:5]
+        heroes_ally = sorted(heroes["ally"], key=lambda p: -p[2])[:4]
+        heroes_self = heroes["self"][:1]
         legacy_dots = {
-            "blue": [[p[0] / msz, p[1] / msz] for p in heroes["ally"]],
+            "blue": [[p[0] / msz, p[1] / msz] for p in heroes_ally],
             "red": [[p[0] / msz, p[1] / msz] for p in heroes_enemy],
-            "green": [[p[0] / msz, p[1] / msz] for p in heroes["self"]],
+            "green": [[p[0] / msz, p[1] / msz] for p in heroes_self],
             "yellow": [[d["n"][0], d["n"][1]] for d in r["dots"]["monster"]],
         }
         # 塔: 旧=[[nx,ny]...], 新=towers{ally,enemy}
