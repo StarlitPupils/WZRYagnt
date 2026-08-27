@@ -598,33 +598,27 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 d_ally = dist_width(na[0], na[1])
                 if d_ally < 0.12 and not mm_red:
                     return {"type": "none", "reason": "follow_ally_hold"}
-                _sg2 = (mm.get("dots") or {}).get("green") or []
-                _myx, _myy = _sg2[0] if _sg2 else (0.5, 0.5)
-                _mm_bl_near = None
-                for _p in mm_blue:
-                    if _mm_bl_near is None or math.hypot(_p[0]-_myx, _p[1]-_myy) \
-                            < math.hypot(_mm_bl_near[0]-_myx, _mm_bl_near[1]-_myy):
-                        _mm_bl_near = _p
-                _ally_corridor = _mm_bl_near is not None and (
-                    _corridor(_mm_bl_near, _down_c, 0.35)
-                    or _corridor(_mm_bl_near, _mid_c, 0.35))
-                if _mm_bl_near is not None and not _ally_corridor:
-                    lx, ly = lane
-                    target = (lx, ly)
-                    reason = "lane_develop_hold"
-                else:
-                    target = (na[0], na[1])
-                    reason = "follow_ally"
+                # v3.0 支援=跟随队友(用户): 屏内队友无条件跟(三条路都支援), 只避河道中央站桩
+                target = (na[0], na[1])
+                reason = "follow_ally"
             elif mm_blue and not in_opening:
                 # 璺熼槦鐩爣: 涓嬭矾璧板粖钃濈偣浼樺厛(勬墜), 娆￠変腑璺 璐績(闃插崟鐐逛吉妫)
                 _down_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
                 _mid_blue = [p for p in mm_blue if _corridor(p, _mid_c, 0.35)]
-                # v2.91 河道/上路蓝点不跟随(支援路线硬约束: 只中/下), 无走廊蓝点则去发育路
+                # v3.0 支援=跟随队友: 发育路/中路走廊蓝点优先, 无则跟最近蓝点(三条路都支援);
+                #      河道中央带(r<0.10 距0.5,0.5)蓝点不跟(队友在河道=不陪他站桩, 去发育路)
                 _pool_b = _down_blue or _mid_blue
                 if not _pool_b:
-                    lx, ly = lane
-                    target = (lx, ly)
-                    reason = "lane_develop_hold"
+                    _sg3 = (mm.get("dots") or {}).get("green") or []
+                    _px3, _py3 = _sg3[0] if _sg3 else (0.5, 0.5)
+                    _nb3 = min(mm_blue, key=lambda p: (p[0]-_px3)**2 + (p[1]-_py3)**2)
+                    if math.hypot(_nb3[0]-0.5, _nb3[1]-0.5) < 0.10:
+                        lx, ly = lane
+                        target = (lx, ly)
+                        reason = "lane_develop_hold"
+                    else:
+                        target = (_nb3[0], _nb3[1])
+                        reason = "follow_ally_minimap"
                 else:
                     lx = sum(p[0] for p in _pool_b) / len(_pool_b)
                     ly = sum(p[1] for p in _pool_b) / len(_pool_b)
