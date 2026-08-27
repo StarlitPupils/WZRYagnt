@@ -365,13 +365,14 @@ class MMDetectorV7:
             res[name] = out_pts
 
         # v2.78 红环互斥: 与队友/自己环同点(<9px)的红点=队友图标红色纹理 -> 删
+        # v2.94 9->15px: 队友蓝圈头像的红色纹理环实测偏移 13px, 旧线漏删 -> 红点团假敌英
         if res.get("enemy"):
             _ally_pts = [p for pp in (res.get("ally", []) + res.get("self", []))
                          for p in (pp[:2],)]
             if _ally_pts:
                 kp = []
                 for e in res["enemy"]:
-                    if any(math.hypot(e[0] - a[0], e[1] - a[1]) < 9 for a in _ally_pts):
+                    if any(math.hypot(e[0] - a[0], e[1] - a[1]) < 15 for a in _ally_pts):
                         continue
                     kp.append(e)
                 res["enemy"] = kp
