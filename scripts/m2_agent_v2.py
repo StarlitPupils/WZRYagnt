@@ -1143,64 +1143,9 @@ def main():
                 #   哪排有"Starliit-001"白色名牌(另一排是敌方黑名牌) -> 自己在那排
                 if not cooldowns.get("camp_row_stale", True) is False:
                     pass
-                _sel_row = None
-                try:
-                    # 用户铁律: "Starliit-001 名牌在上排=蓝方 / 下排=红方"
-                    # 名牌检测: 白色文字行投影 (纯白 V>200 且低饱和), 行峰即名字带
-                    _hsvS = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                    _H_S_ = _hsvS[..., 0].astype(int)
-                    _S_S_, _V_S_ = _hsvS[..., 1].astype(int), _hsvS[..., 2].astype(int)
-                    _wh_s = ((_S_S_ < 60) & (_V_S_ > 200)).astype(np.uint8)
-                    # 行投影(排除顶部栏/底栏, x 150-1130)
-                    _rowsum = _wh_s[:, 150:1130].sum(axis=1)
-                    # 找 3 个最强连续行带(名字行 y): 分值=该行像素
-                    _top_rows = sorted(range(720), key=lambda y: -int(_rowsum[y]))[:40]
-                    # 名字带需两侧有字符分布(玩家名宽 60-160px), 取带峰值>80px 的行
-                    _cand_rows = [y for y in _top_rows if int(_rowsum[y]) >= 80]
-                    if _cand_rows:
-                        _name_y = int(np.median(_cand_rows))
-                        _sel_row = "blue" if _name_y < 360 else "red"
-                except Exception:
-                    _sel_row = None
-                # v3.7 名牌行铁律: 仅当"真选人界面"(上下排各有较多白色名牌文字带)时判阵营
-                #   连续3帧稳定才锁; 结算/大厅页只有单一文字带 -> 不满足双带条件, 永不锁
-                try:
-                    # v3.8 严判真选人界面: 上下排各5卡 + 中部有蓝/红队伍色条(VS标识)
-                    _hsvS2 = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                    _S2, _V2 = _hsvS2[..., 1].astype(int), _hsvS2[..., 2].astype(int)
-                    _wh2 = ((_S2 < 60) & (_V2 > 200)).astype(np.uint8)
-                    _rowsum2 = _wh2[:, 150:1130].sum(axis=1)
-                    _up_band2 = int(_rowsum2[40:280].max())
-                    _lo_band2 = int(_rowsum2[420:660].max())
-                    # 中部 VS 区带: 蓝色或红色队伍条 (y 300-420 左右)
-                    _vs_roi = frame[300:430, 480:800]
-                    _hsv_vs = cv2.cvtColor(_vs_roi, cv2.COLOR_BGR2HSV)
-                    _hv = _hsv_vs[..., 0].astype(int)
-                    _sv = _hsv_vs[..., 1].astype(int)
-                    _vv = _hsv_vs[..., 2].astype(int)
-                    _vs_blue = int(((_hv >= 85) & (_hv <= 135) & (_sv > 60) & (_vv > 60)).sum())
-                    _vs_red = int((((_hv <= 15) | (_hv >= 165)) & (_sv > 60) & (_vv > 60)).sum())
-                    _vs_big = max(_vs_blue, _vs_red) >= 300
-                    _dual_band = _up_band2 >= 80 and _lo_band2 >= 80 and _vs_big
-                except Exception:
-                    _dual_band = False
-                if _sel_row and _dual_band:
-                    _prev_row = cooldowns.get("sel_row_prev")
-                    _row_streak = int(cooldowns.get("sel_row_streak", 0))
-                    if _prev_row == _sel_row:
-                        _row_streak += 1
-                    else:
-                        _row_streak = 1
-                    cooldowns["sel_row_prev"] = _sel_row
-                    cooldowns["sel_row_streak"] = _row_streak
-                    if _row_streak >= 3 and not cooldowns.get("camp"):
-                        cooldowns["camp"] = _sel_row
-                        cooldowns.pop("camp_votes", None)
-                        print(f"[{datetime.now():%H:%M:%S}] 阵营判断(选人排位3帧): "
-                              f"{'蓝方' if _sel_row == 'blue' else '红方'} → "
-                              f"发育路方向 {LANE_DIR_BLUE if _sel_row == 'blue' else LANE_DIR_RED}")
-                elif not _dual_band:
-                    cooldowns["sel_row_streak"] = 0
+                # v3.9 选人页像素判阵营已移除: 大厅/主页/英雄列表都是蓝白调文字带,
+                #   任何色带/名牌门控都会误判(实测多次锁错)。阵营由开局绿点(基地角)主导:
+                #   v3.4 绿点票*3(最强)+蓝点票*1(辅助); 水晶/泉水色仅参考不参与锁定。
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
                     _async_result_detect(frame, reward)
