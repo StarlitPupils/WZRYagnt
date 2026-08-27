@@ -217,19 +217,23 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         cooldowns["red_stable"] = float(cooldowns.get("red_stable", 0)) + 1
     else:
         cooldowns["red_stable"] = 0
-    # v2.97: 释放证据 = 屏幕敌英(yolo) 或 屏幕敌红条; 红点(_mmr_pts0)不参与
-    if enemies or enemy_bars:
+    # v2.97 释放证据 = 屏幕敌英(yolo框) 或 屏幕敌红条(yolo未检出时可作辅助);
+    #          v2.98 红条独证不释放技能: 暴君/红buff等野怪红条也是红条且yolo常漏检
+    #          -> 无 yolo enemy_hero 框时, 红条只算"疑似敌英", 不触发任何技能/出钩
+    _has_yolo_eh = bool(enemies)
+    if _has_yolo_eh or enemy_bars:
         _nq0 = nearest(enemies) if enemies else None
         _dq0 = dist_width(_nq0[0], _nq0[1]) if _nq0 else 0.90
         _s_ = (state_dict.get("ui") or {}).get("skill_states") or {}
         _s3_ = _s_.get("3") or {}
         _s2_ = _s_.get("2") or {}
         _s1_ = _s_.get("1") or {}
-        if ready("skill3_t", 20.0) and _s3_.get("unlocked") is not False:
+        if ready("skill3_t", 20.0) and _s3_.get("unlocked") is not False \
+                and _has_yolo_eh:
             cooldowns["skill3_t"] = now
             cooldowns["skill"] = now
             return {"type": "skill", "id": 3, "mode": "tap", "reason": "ult_near_enemy"}
-        # v2.97 出钩铁律: 屏幕敌英在二技能范围内才出钩; 只有红条无框时不勾(位置不可靠)
+        # v2.98 出钩铁律: 必须 yolo 敌英框 + 二技能范围内; 纯红条(暴君)不出钩
         if _nq0 is not None and _dq0 <= SKILL2_RANGE_FRAC \
                 and ready("skill2_t", SKILL2_THROTTLE_S) and _s2_.get("unlocked") is not False:
             cooldowns["skill2_t"] = now
@@ -238,11 +242,12 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             cooldowns["hook_anchor_dist"] = _dq0
             return {"type": "skill", "id": 2, "mode": "tap",
                     "reason": "enemy_in_skill2_range"}
-        if ready("skill1_t", SKILL1_THROTTLE_S) and _s1_.get("unlocked") is not False:
+        if ready("skill1_t", SKILL1_THROTTLE_S) and _s1_.get("unlocked") is not False \
+                and _has_yolo_eh:
             cooldowns["skill1_t"] = now
             cooldowns["skill"] = now
             return {"type": "skill", "id": 1, "mode": "tap", "reason": "enemy_hero_near"}
-        if ready("attack_t", ATTACK_THROTTLE_S):
+        if ready("attack_t", ATTACK_THROTTLE_S) and _has_yolo_eh:
             cooldowns["attack_t"] = now
             return {"type": "attack", "priority": "free", "reason": "engage_enemy"}
 
@@ -299,10 +304,12 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     skill_states = (state_dict.get("ui") or {}).get("skill_states") or {}
     # v2.70 鏁屼汉璇佹嵁=灞忓箷鏁岃嫳妗鎴忓湴鍥剧孩鐐浠绘剰璺濈, 鐢埛璇箟: 鍑虹幇鍗虫墦)
     # v2.97 释放证据 = 屏幕敌英/敌红条(小地图红点不参与出钩与技能)
+    #     v2.98 红条独证不释放: 暴君/野怪红条 yolo 漏检时算"疑似", 技能必须 yolo 敌英框
     _mmr_pts = ((state_dict.get("minimap") or {}).get("dots") or {}).get("red") or []
     _mm_own = _mm_self(state_dict)
     _d_red_near = (min([math.hypot(p[0] - _mm_own[0], p[1] - _mm_own[1]) for p in _mmr_pts],
                        default=9.9) if _mm_own else 9.9)
+    _has_yolo_eh_q = bool(enemies)
     if enemies or enemy_bars:
         _nq = nearest(enemies) if enemies else None
         _dq = dist_width(_nq[0], _nq[1]) if _nq else 0.90
@@ -329,11 +336,11 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         # 鈶鏁岃繎韬 澶嫑辩华鍏堝 -> 鈶閽-> 鈶涓鎶鑳(v2.66: 鏈夋晫璇佹嵁鍗虫斁, 璺濈涓嶆煡)
         in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= 3.5
         if ready("skill3_t", 20.0) and _s3q.get("unlocked") is not False \
-                and _dq < 0.75:
+                and _dq < 0.75 and _has_yolo_eh_q:
             cooldowns["skill3_t"] = now
             cooldowns["skill"] = now
             return {"type": "skill", "id": 3, "mode": "tap", "reason": "ult_near_enemy"}
-        # v2.97 出钩铁律: 屏幕敌英在二技能范围内才出钩(红条仅作射击参考, 不出钩)
+        # v2.98 出钩铁律: yolo 敌英框 + 二技能范围内才出钩; 纯红条(暴君)不出钩
         if not in_ult and _nq is not None and _dq <= SKILL2_RANGE_FRAC \
                 and ready("skill2_t", SKILL2_THROTTLE_S) \
                 and _s2q.get("unlocked") is not False:
@@ -344,11 +351,11 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             return {"type": "skill", "id": 2, "mode": "tap",
                     "reason": "enemy_in_skill2_range"}
         if not in_ult and ready("skill1_t", SKILL1_THROTTLE_S) \
-                and _s1q.get("unlocked") is not False:
+                and _s1q.get("unlocked") is not False and _has_yolo_eh_q:
             cooldowns["skill1_t"] = now
             cooldowns["skill"] = now
             return {"type": "skill", "id": 1, "mode": "tap", "reason": "enemy_hero_near"}
-        # v2.65 鈶鏁屼汉瀛樺湪辨櫘鏀        if ready("attack_t", ATTACK_THROTTLE_S):
+        # v2.65 鈶鏁屼汉瀛樺湪辨櫘鏀        if ready("attack_t", ATTACK_THROTTLE_S) and _has_yolo_eh_q:
             cooldowns["attack_t"] = now
             return {"type": "attack", "priority": "free", "reason": "engage_enemy"}
         # v2.71 鎶鑳介棬鑷洕(1s鑺傛祦): 鏈夋晫璇佹嵁鍗存湭鍑轰换浣曟妧鑳芥椂鎵撳嵃鍏抽敭閲        if enemies or enemy_bars:
@@ -1263,6 +1270,8 @@ def main():
             dets = list(cached_dets)
             # v2.91 野怪互斥(源头): neutral_monster 框边距20px内重叠的 enemy_hero = 误标野怪 -> 剔除;
             #    低置信 enemy_hero (0.35-0.55) 且无 monster 佐证也有风险, 置信门槛 0.55 放行
+            # v2.98 体型上限: 暴君/主宰 box 宽~276px >> 英雄(<=200px); 暴君血条厚 10-12px
+            #    (英雄 5-11px). 宽>215 或 高>270 的 enemy_hero = 巨兽(暴君/主宰/大龙), 剔除
             try:
                 _mon_b = [(d.xyxy[0], d.xyxy[1], d.xyxy[2], d.xyxy[3])
                           for d in dets if d.cls == "neutral_monster"]
@@ -1276,6 +1285,13 @@ def main():
                         return False
                     dets = [d for d in dets
                             if not (d.cls == "enemy_hero" and _near_mon(d))]
+                def _not_beast(d):
+                    if d.cls != "enemy_hero":
+                        return True
+                    _bw = d.xyxy[2] - d.xyxy[0]
+                    _bh = d.xyxy[3] - d.xyxy[1]
+                    return not (_bw > 215 or _bh > 270)
+                dets = [d for d in dets if _not_beast(d)]
             except Exception:
                 pass
             # hero identity bar-top color guard
