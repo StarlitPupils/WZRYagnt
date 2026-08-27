@@ -33,6 +33,7 @@ SKILL3_ACTIVE_S = 3.5
 SKILL_DEBOUNCE_S = 0.05
 SKILL2_THROTTLE_S = 3.0      # hook throttle 3s (anti-AFK)
 SKILL2_RANGE_FRAC = 0.45
+SKILL1_RANGE_FRAC = 0.32   # v3.5 一技能(近身消耗)范围: 勾未中时只在一技能范围内用一技能
 SKILL_HP_MIN = 0.60
 HOOK_FLIGHT_S = 0.5           # 閽瓙椋炶鏈燂細閲婃斁鍚0.5s 鍐呭仠姝鍔紙绛夊嬀涓粨鏋滐紝闃茶嚜宸辫蛋杩戣鍒級
 # throttle consts
@@ -316,15 +317,16 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         _s3q = skill_states.get("3") or {}
         _s2q = skill_states.get("2") or {}
         _s1q = skill_states.get("1") or {}
-        # 鈶閽腑杩炴嫑: 閽悗1.2绉掑唴鏁岃鎷夎繎 -> 澶嫑+鍙敜甯涓鎶鑳涓姘斿懙鎴        hook_pending = float(cooldowns.get("hook_pending", 0.0))
+        # v3.5 用户连招铁律: 勾中=接召唤师+三技能小连招; 没勾中=只用一技能消耗(不接其他)
+        hook_pending = float(cooldowns.get("hook_pending", 0.0))
+        hook_missed = (hook_pending > 0 and now - hook_pending > 1.2)
         if hook_pending and now - hook_pending <= 1.2 and _dq < 0.40:
+            # 勾中 -> 召唤师 + 三技能 (用户明确小连招=召唤师+三技能, 不接一技能)
             combo = []
-            if ready("skill3_t", 20.0) and _s3q.get("unlocked") is not False:
-                combo.append({"type": "skill", "id": 3, "mode": "tap"})
             if ready("summoner_t", 5.0):
                 combo.append({"type": "summoner"})
-            if ready("skill1_t", 1.5):
-                combo.append({"type": "skill", "id": 1, "mode": "tap"})
+            if ready("skill3_t", 20.0) and _s3q.get("unlocked") is not False:
+                combo.append({"type": "skill", "id": 3, "mode": "tap"})
             if combo:
                 for c in combo:
                     if c.get("type") == "skill":
@@ -332,9 +334,18 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                     else:
                         cooldowns["summoner_t"] = now
                 cooldowns["skill"] = now
+                cooldowns["hook_pending"] = 0.0   # 消耗掉
                 return {"type": "combo", "actions": combo, "reason": "hook_confirmed_combo"}
-        # 鈶鏁岃繎韬 澶嫑辩华鍏堝 -> 鈶閽-> 鈶涓鎶鑳(v2.66: 鏈夋晫璇佹嵁鍗虫斁, 璺濈涓嶆煡)
+        # 勾未中: 只用一技能消耗(不再接三技能/召唤师/攻击), 一技能进入范围即放
+        if hook_missed:
+            cooldowns["hook_pending"] = 0.0
+            if ready("skill1_t", SKILL1_THROTTLE_S) and _nq is not None \
+                    and _dq <= SKILL1_RANGE_FRAC and _s1q.get("unlocked") is not False:
+                cooldowns["skill1_t"] = now
+                cooldowns["skill"] = now
+                return {"type": "skill", "id": 1, "mode": "tap", "reason": "hook_missed_harass"}
         in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= 3.5
+        # 常规(无钩等待): 三技能只在近敌且未勾等待时
         if ready("skill3_t", 20.0) and _s3q.get("unlocked") is not False \
                 and _dq < 0.75 and _has_yolo_eh_q:
             cooldowns["skill3_t"] = now
@@ -350,7 +361,9 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             cooldowns["hook_anchor_dist"] = _dq
             return {"type": "skill", "id": 2, "mode": "tap",
                     "reason": "enemy_in_skill2_range"}
+        # 一技能消耗(平时也允许, 敌英在一技能范围内)
         if not in_ult and ready("skill1_t", SKILL1_THROTTLE_S) \
+                and _nq is not None and _dq <= SKILL1_RANGE_FRAC \
                 and _s1q.get("unlocked") is not False and _has_yolo_eh_q:
             cooldowns["skill1_t"] = now
             cooldowns["skill"] = now
@@ -1125,6 +1138,36 @@ def main():
             except Exception:
                 pass
             if phase != MatchPhase.IN_MATCH:
+                # v3.4 用户铁律: 选人界面自己在上排=蓝方/下排=红方(等进游戏前先记阵营)
+                #   检测: 上排名牌带(y90-165) 与 下排名牌带(y480-560) 白色高亮文字像素,
+                #   哪排有"Starliit-001"白色名牌(另一排是敌方黑名牌) -> 自己在那排
+                if not cooldowns.get("camp_row_stale", True) is False:
+                    pass
+                _sel_row = None
+                try:
+                    # 用户铁律: "Starliit-001 名牌在上排=蓝方 / 下排=红方"
+                    # 名牌检测: 白色文字行投影 (纯白 V>200 且低饱和), 行峰即名字带
+                    _hsvS = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                    _H_S_ = _hsvS[..., 0].astype(int)
+                    _S_S_, _V_S_ = _hsvS[..., 1].astype(int), _hsvS[..., 2].astype(int)
+                    _wh_s = ((_S_S_ < 60) & (_V_S_ > 200)).astype(np.uint8)
+                    # 行投影(排除顶部栏/底栏, x 150-1130)
+                    _rowsum = _wh_s[:, 150:1130].sum(axis=1)
+                    # 找 3 个最强连续行带(名字行 y): 分值=该行像素
+                    _top_rows = sorted(range(720), key=lambda y: -int(_rowsum[y]))[:40]
+                    # 名字带需两侧有字符分布(玩家名宽 60-160px), 取带峰值>80px 的行
+                    _cand_rows = [y for y in _top_rows if int(_rowsum[y]) >= 80]
+                    if _cand_rows:
+                        _name_y = int(np.median(_cand_rows))
+                        _sel_row = "blue" if _name_y < 360 else "red"
+                except Exception:
+                    _sel_row = None
+                if _sel_row and not cooldowns.get("camp"):
+                    cooldowns["camp"] = _sel_row
+                    cooldowns.pop("camp_votes", None)
+                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断(选人排位): "
+                          f"{'蓝方' if _sel_row == 'blue' else '红方'} → "
+                          f"发育路方向 {LANE_DIR_BLUE if _sel_row == 'blue' else LANE_DIR_RED}")
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
                     _async_result_detect(frame, reward)
