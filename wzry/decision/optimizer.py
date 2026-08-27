@@ -83,10 +83,18 @@ def _grid_best(f, camp="blue"):
     GX, GY = np.meshgrid(xs, xs)
     V = np.zeros((N, N))
     if f["reds"]:
-        rx = np.array([p[0] for p in f["reds"]])
-        ry = np.array([p[1] for p in f["reds"]])
+        # v2.85 支援路线硬约束: 红场仅保留中/下路走廊内红点(上路红点=不支援不去)
+        _c = state.get("camp") or "blue"
+        _down_c = (0.75, 0.72) if _c == "blue" else (0.25, 0.28)
+        _mid_c = (0.5, 0.58) if _c == "blue" else (0.5, 0.42)
+        _reds_corridor = [p for p in f["reds"]
+                          if min(math.hypot(p[0] - _down_c[0], p[1] - _down_c[1]),
+                                 math.hypot(p[0] - _mid_c[0], p[1] - _mid_c[1])) <= 0.32]
+        reds_use = _reds_corridor or f["reds"]
+        rx = np.array([p[0] for p in reds_use])
+        ry = np.array([p[1] for p in reds_use])
         d_red = np.sqrt((GX[..., None] - rx) ** 2 + (GY[..., None] - ry) ** 2).min(axis=-1)
-        if len(f["reds"]) < 6:      # v2.53 敌群>=6: 红场清零(不向敌群走)
+        if len(reds_use) < 6:      # v2.53 敌群>=6: 红场清零(不向敌群走)
             V += _W["w_win"] * _W["k_win_enemy"] * np.exp(-d_red / 0.08)
             n_near = ((np.sqrt((GX[..., None] - rx) ** 2 + (GY[..., None] - ry) ** 2) < 0.15)
                       .sum(axis=-1))
