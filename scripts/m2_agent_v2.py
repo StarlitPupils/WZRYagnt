@@ -1162,8 +1162,19 @@ def main():
                         _sel_row = "blue" if _name_y < 360 else "red"
                 except Exception:
                     _sel_row = None
-                # v3.6 门控: 3帧稳定名牌行才锁(防结算/大厅白色文字误判), 且仅 WAITING 阶段
-                if _sel_row:
+                # v3.7 名牌行铁律: 仅当"真选人界面"(上下排各有较多白色名牌文字带)时判阵营
+                #   连续3帧稳定才锁; 结算/大厅页只有单一文字带 -> 不满足双带条件, 永不锁
+                try:
+                    _hsvS2 = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                    _S2, _V2 = _hsvS2[..., 1].astype(int), _hsvS2[..., 2].astype(int)
+                    _wh2 = ((_S2 < 60) & (_V2 > 200)).astype(np.uint8)
+                    _rowsum2 = _wh2[:, 150:1130].sum(axis=1)
+                    _up_band2 = int(_rowsum2[40:280].max())
+                    _lo_band2 = int(_rowsum2[420:660].max())
+                    _dual_band = _up_band2 >= 80 and _lo_band2 >= 80
+                except Exception:
+                    _dual_band = False
+                if _sel_row and _dual_band:
                     _prev_row = cooldowns.get("sel_row_prev")
                     _row_streak = int(cooldowns.get("sel_row_streak", 0))
                     if _prev_row == _sel_row:
@@ -1178,6 +1189,8 @@ def main():
                         print(f"[{datetime.now():%H:%M:%S}] 阵营判断(选人排位3帧): "
                               f"{'蓝方' if _sel_row == 'blue' else '红方'} → "
                               f"发育路方向 {LANE_DIR_BLUE if _sel_row == 'blue' else LANE_DIR_RED}")
+                elif not _dual_band:
+                    cooldowns["sel_row_streak"] = 0
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
                     _async_result_detect(frame, reward)
