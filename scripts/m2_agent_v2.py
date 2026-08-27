@@ -598,8 +598,23 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 d_ally = dist_width(na[0], na[1])
                 if d_ally < 0.12 and not mm_red:
                     return {"type": "none", "reason": "follow_ally_hold"}
-                target = (na[0], na[1])
-                reason = "follow_ally"
+                _sg2 = (mm.get("dots") or {}).get("green") or []
+                _myx, _myy = _sg2[0] if _sg2 else (0.5, 0.5)
+                _mm_bl_near = None
+                for _p in mm_blue:
+                    if _mm_bl_near is None or math.hypot(_p[0]-_myx, _p[1]-_myy) \
+                            < math.hypot(_mm_bl_near[0]-_myx, _mm_bl_near[1]-_myy):
+                        _mm_bl_near = _p
+                _ally_corridor = _mm_bl_near is not None and (
+                    _corridor(_mm_bl_near, _down_c, 0.35)
+                    or _corridor(_mm_bl_near, _mid_c, 0.35))
+                if _mm_bl_near is not None and not _ally_corridor:
+                    lx, ly = lane
+                    target = (lx, ly)
+                    reason = "lane_develop_hold"
+                else:
+                    target = (na[0], na[1])
+                    reason = "follow_ally"
             elif mm_blue and not in_opening:
                 # 璺熼槦鐩爣: 涓嬭矾璧板粖钃濈偣浼樺厛(勬墜), 娆￠変腑璺 璐績(闃插崟鐐逛吉妫)
                 _down_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
@@ -1199,14 +1214,30 @@ def main():
                     pass
 
             # ---- 寮灞闃佃惀鍒柇 v2.22堣嚜宸辩豢鐐瑰嚭鐢熻鍒畾, 娉夋按鑹蹭粎鍏滃簳---
+            # v2.99 铁律: 阵营未定不锁死不默认蓝方! 依次尝试:
+            #   ① 小地图自己绿点(基地角落): 右下=蓝, 左上=红 (最可靠)
+            #   ② 小地图右下/左上角落水晶色强弱 (蓝方右下蓝水晶偏蓝)
+            #   ③ 屏幕中心泉水ROI (兜底, 仍不判即下帧继续, 直到判对才走发育路)
             if not cooldowns.get("camp"):
                 camp = None
                 greens = (mm.get("dots") or {}).get("green") or []
                 if greens:
                     gx, gy = greens[0]
                     # 钃濇柟娉忓湴鍥惧彸涓 绾柟娉宸笂
-                    camp = "blue" if (gx > 0.4 and gy > 0.4) else "red"
+                    camp = "blue" if (gx > 0.35 and gy > 0.35) else "red"
                 else:
+                    # 小地图角落水晶蓝度: 蓝方右下角水晶(蓝, B>R), 红方左上角水晶偏红
+                    try:
+                        _mm0 = frame[0:232, 0:232]
+                        _br = _mm0[176:232, 176:232].reshape(-1, 3).mean(axis=0)
+                        _tl = _mm0[0:56, 0:56].reshape(-1, 3).mean(axis=0)
+                        if _br[0] > _br[2] * 1.05 and _br[0] > _tl[0]:
+                            camp = "blue"
+                        elif _tl[2] > _tl[0] * 1.05 and _tl[2] > _br[2]:
+                            camp = "red"
+                    except Exception:
+                        pass
+                if camp is None:
                     from wzry.vision.camp import detect_camp_from_center
                     camp = detect_camp_from_center(frame)
                 if camp:
@@ -1214,7 +1245,7 @@ def main():
                     print(f"[{datetime.now():%H:%M:%S}] 阵营判断: {'蓝方' if camp == 'blue' else '红方'} "
                           f"→ 发育路方向 {LANE_DIR_BLUE if camp == 'blue' else LANE_DIR_RED}")
                 else:
-                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 未判定（泉水色不明显，默认蓝方）")
+                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 未定(继续采样, 不默认!)")
 
             # ---- 寮灞闃靛璇嗗埆坴2.10歮odlens 璇婚夎嫳闆勭晫闈枃瀛楋紝鍚挓棣椾晶=鎴戞柟---
             # 鐢悗鍙扮嚎绋嬮伩鍏嶉樆濉炰富寰幆涚粨鏋滃瓨鍏cooldowns["roster"]
