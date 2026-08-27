@@ -43,6 +43,7 @@ class _Track:
 class MMTrackerV7:
     def __init__(self):
         self.det = MMDetectorV7()
+        self._last_mm = None   # v2.90 最近小地图裁剪(输出点重闸用)
         self.tracks = {"self": {}, "ally": {}, "enemy": {}}
         self.minion_tracks = {"ally": {}, "enemy": {}}
         self.frame_no = 0
@@ -110,6 +111,16 @@ class MMTrackerV7:
                     ys = [p[1] for p in t.hist]
                     if max(xs) - min(xs) < 1.5 and max(ys) - min(ys) < 1.5:
                         continue
+                # v2.90 输出点重闸: 平滑后的轨迹点必须仍为敌英(头像)模板
+                # (原始检测点过闸, 平滑输出点可能漂离头像 -> 蓝环队友误入红点)
+                if cls == "enemy" and self._last_mm is not None:
+                    try:
+                        from wzry.vision.mm_rules_v7 import _has_avatar
+                        if not _has_avatar(self._last_mm, int(round(t.x)),
+                                           int(round(t.y)), thr=0.62):
+                            continue
+                    except Exception:
+                        pass
                 # v2.39 位置中值滤波: 输出=最近3帧中值(消除单帧漂移闪烁)
                 if len(t.hist) >= 3:
                     hx = sorted(p[0] for p in t.hist)[1]
@@ -182,6 +193,10 @@ class MMTrackerV7:
     def update(self, frame):
         t0 = time.perf_counter()
         r = self.det.detect(frame)
+        # v2.90 输出点重闸: 留存小地图裁剪 (0..msz 方区, 与 det 同坐标系)
+        r0 = r.get("size", 232) or 232
+        self._last_mm = (frame[0:int(r0), 0:int(r0)]
+                         if frame.shape[0] >= int(r0) and frame.shape[1] >= int(r0) else None)
         if not r.get("found"):
             # v2.27 非对局: 清空轨迹并返回未找到(避免大厅/选英雄伪标注与伪决策)
             for cls in ("self", "ally", "enemy"):
