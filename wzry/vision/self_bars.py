@@ -26,8 +26,9 @@ import numpy as np
 # 血条特征
 BRIGHT_V = 140          # 血条高亮
 BAR_W_MIN, BAR_W_MAX = 25, 150
-BAR_H_MAX = 10
+BAR_H_MAX = 13
 BAR_H_MIN = 5           # v2.36 野怪/小怪血条很细(1-4px), 英雄血条粗(5-9px) -> 下限过滤
+                       # v2.87: 上限放宽 10->13 (PW帧抗锯齿绿条 9-11px, 旧10px丢失->假dead)
 BAR_AREA_MIN = 40
 # HUD 排除区（右侧 UI、顶部 HUD、底部技能栏）
 EXCLUDE_X = 1230
@@ -231,6 +232,20 @@ def find_enemy_bars(frame):
     if best_w > 0:
         return best_w / max(1, mask.shape[1]), best_w, mask.shape[1], (best_x, best_y)
     return None, 0, mask.shape[1], None
+
+
+def death_banner_px(frame):
+    """v2.87 死亡横幅检测: 顶部中央(0-46, 500-790)暗红色像素数。
+    真死亡('查看死亡回放'深红横幅)>=2500; 击杀播报/存活时<=1800 -> 阈值2500分离。"""
+    try:
+        roi = frame[0:46, 500:790]
+        if roi.size == 0:
+            return 0
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        H, S, V = hsv[..., 0].astype(int), hsv[..., 1].astype(int), hsv[..., 2].astype(int)
+        return int((((H <= 15) | (H >= 165)) & (S > 80) & (V >= 40) & (V <= 150)).sum())
+    except Exception:
+        return 0
 
 
 def self_hp_mp(frame):

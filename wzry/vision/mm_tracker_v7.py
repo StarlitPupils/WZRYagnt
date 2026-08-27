@@ -103,6 +103,13 @@ class MMTrackerV7:
                 # v2.45 自己: 低置信(假自环)不输出
                 if cls == "self" and t.conf < 0.40:
                     continue
+                # v2.87 红点死守防线: 敌方轨迹必须"动" (幽灵=塔饰/角饰红环, 完全静止)
+                # 位置历史跨度 <1.5px 且年龄>=6帧 -> 静物装饰, 丢弃; 真实敌方位移明显
+                if cls == "enemy" and t.age >= 6 and len(t.hist) >= 3:
+                    xs = [p[0] for p in t.hist]
+                    ys = [p[1] for p in t.hist]
+                    if max(xs) - min(xs) < 1.5 and max(ys) - min(ys) < 1.5:
+                        continue
                 # v2.39 位置中值滤波: 输出=最近3帧中值(消除单帧漂移闪烁)
                 if len(t.hist) >= 3:
                     hx = sorted(p[0] for p in t.hist)[1]
@@ -204,9 +211,11 @@ class MMTrackerV7:
         minions = {cls: self._minion_result(cls) for cls in ("ally", "enemy")}
 
         # ---- 兼容旧接口: 蓝=队友 红=敌人 绿=自己 黄=野怪 ----
+        # v2.87: 红点按置信度取前5(5v5上限, 防轨迹堆积幽灵红点, 旧无cap -> map red 7)
+        heroes_enemy = sorted(heroes["enemy"], key=lambda p: -p[2])[:5]
         legacy_dots = {
             "blue": [[p[0] / msz, p[1] / msz] for p in heroes["ally"]],
-            "red": [[p[0] / msz, p[1] / msz] for p in heroes["enemy"]],
+            "red": [[p[0] / msz, p[1] / msz] for p in heroes_enemy],
             "green": [[p[0] / msz, p[1] / msz] for p in heroes["self"]],
             "yellow": [[d["n"][0], d["n"][1]] for d in r["dots"]["monster"]],
         }

@@ -313,12 +313,17 @@ class MMDetectorV7:
                             if pure_red / 49.0 >= 0.55:
                                 continue
                         # 固定塔点/野怪点排除(这些是塔图标/野怪, 非敌英雄):
+                        # v2.87 半径 13->17 (塔图标边缘环检出偏移13.9px 曾逃逸 -> 幽灵红点)
                         near_bad = False
                         for (fx_, fy_) in BLUE_TOWER_PTS + RED_TOWER_PTS + MONSTER_PTS:
-                            if math.hypot(px - fx_ * mw, py - fy_ * mh) < 13:
+                            if math.hypot(px - fx_ * mw, py - fy_ * mh) < 17:
                                 near_bad = True
                                 break
                         if near_bad:
+                            continue
+                        # v2.87 圆盘边界: 真英雄头像在小地图圆盘内(r<=112), 盘外=红塔S图标/角饰
+                        # (实测真头像最小r=106@(60,26), 幽灵塔饰r=118-132 -> 112分离)
+                        if math.hypot(px - mw / 2.0, py - mh / 2.0) > 112:
                             continue
                     if name in ("self", "ally") and px > 216 and py > 216:
                         continue   # corner decor (blue block/crystal/triangle)

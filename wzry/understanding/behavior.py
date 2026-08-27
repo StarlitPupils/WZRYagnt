@@ -27,6 +27,8 @@ import time
 
 DEAD_MISS_FRAMES = 6     # 自己血条连续缺失帧数 -> 疑似阵亡
 DEAD_CONFIRM_S = 3.0     # 缺失持续秒数 -> 确认阵亡（防复活/画面抖动误判）
+DEAD_BANNER_MIN = 2500   # v2.87 死亡横幅暗红px阈值(真死>=2500, 击杀播报<=1800)
+DEAD_BANNER_STREAK = 2   # 横幅连续帧数 -> 铁证死亡(死亡时屏幕有'查看死亡回放'提示)
 RECALL_ACTIVE_S = 8.0    # 回城读条持续秒数（与决策层一致）
 HOOK_KILL_WINDOW_S = 3.0  # 勾到人后击杀确认窗口（勾杀组合 +30）
 KILL_NEAR_FRAC = 0.35     # 击杀判定：近处敌人（<0.35 屏宽）从视野消失
@@ -44,6 +46,8 @@ class BehaviorTagger:
         self._hp_miss_since = 0.0
         self._last_hp = None
         self._dead_reported = False
+        self._dead_since = None      # v2.87 死亡(横幅铁证)起始时间
+        self._banner_streak = 0      # v2.87 死亡横幅连续帧数
         self._last_label = None
         self._last_near_enemies = 0
         self._last_near_minions = 0
@@ -67,7 +71,16 @@ class BehaviorTagger:
             s = u.get("screen") or [0.5, 0.5, 0, 0]
             return ((s[0] - 0.5) ** 2 + (s[1] - 0.5) ** 2) ** 0.5
 
-        # ---- 阵亡检测：自己血条持续缺失（死亡无血条，复活后恢复）----
+        # ---- 阵亡检测 v2.87: 死亡横幅铁证优先(用户: 死亡时屏幕有提示) ----
+        # 屏幕死亡横幅("查看死亡回放"暗红)连续2帧 -> 铁证死亡;
+        # 血条缺失仅作辅助(血条检测可能丢失, 横幅缺失时不判死)
+        banner_px = int(ui.get("death_banner") or 0)
+        self._banner_streak = (self._banner_streak + 1
+                               if banner_px >= DEAD_BANNER_MIN else 0)
+        banner_dead = self._banner_streak >= DEAD_BANNER_STREAK
+        if banner_dead:
+            self._dead_since = now
+        dead = banner_dead
         if hp is None:
             if self._hp_miss_streak == 0:
                 self._hp_miss_since = now
@@ -75,8 +88,18 @@ class BehaviorTagger:
         else:
             self._hp_miss_streak = 0
             self._hp_miss_since = 0.0
-        dead = (self._hp_miss_streak >= DEAD_MISS_FRAMES
-                and now - self._hp_miss_since >= DEAD_CONFIRM_S)
+        # 血条缺失辅助: 仅当横幅曾出现过(近期死亡回忆)才补充确认
+        miss_dead = (self._hp_miss_streak >= DEAD_MISS_FRAMES
+                     and now - self._hp_miss_since >= DEAD_CONFIRM_S
+                     and self._dead_since is not None
+                     and now - self._dead_since < 40.0)
+        dead = dead or miss_dead
+        # 复活: 血条恢复 + 横幅消失 -> 解除
+        if (self._dead_since is not None and hp is not None
+                and banner_px < DEAD_BANNER_MIN
+                and now - self._dead_since > 3.0):
+            self._dead_since = None
+            self._banner_streak = 0
         if not dead:
             self._dead_reported = False
 
