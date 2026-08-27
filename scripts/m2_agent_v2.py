@@ -277,14 +277,16 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
 
     # ---- brainless fire (skills if enemy present) ----
     _hpq = float((state_dict.get("ui") or {}).get("hp") or 1.0)
-    # v2.80 mana: fallback = skill-cost estimate when measurement missing
+    # v2.82 mana: measurement missing -> skill-cost estimate (0.10/skill, 12+ => recall)
     _mp_raw = (state_dict.get("ui") or {}).get("mp")
     _skill_cnt = 0
     for _sk in ("skill1_t", "skill2_t", "skill3_t"):
         _st = float(cooldowns.get(_sk, 0.0) or 0.0)
         if _st and now - _st < 90.0:
             _skill_cnt += 1
-    _mp_est = max(0.0, round(1.0 - 0.06 * _skill_cnt, 2))
+    _mp_est = max(0.0, round(1.0 - 0.10 * _skill_cnt, 2))
+    if _skill_cnt >= 12 and _mp_est > 0.15:
+        _mp_est = 0.15
     _mpq = float(_mp_raw) if (_mp_raw is not None and _mp_raw == _mp_raw
                               and 0.0 <= float(_mp_raw) <= 1.0) else _mp_est
     skill_states = (state_dict.get("ui") or {}).get("skill_states") or {}
