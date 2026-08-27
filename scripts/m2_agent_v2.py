@@ -70,12 +70,14 @@ def _mm_self(state_dict):
     mm = state_dict.get("minimap") or {}
     dots = (mm.get("dots") or {}) if mm.get("found") else {}
     greens = dots.get("green") or []
-    return (greens[0][0], greens[0][1]) if greens else (0.5, 0.5)
+    # v2.89: 无自点(未追踪到)返回 None, 调用方不作为红点距离基准(旧(0.5,0.5)兜底
+    # -> 泉水期任意中点红点<0.15 触发空放技能)
+    return (greens[0][0], greens[0][1]) if greens else None
 
 
 def _away_map(state_dict, tx, ty, k=0.12):
     """decoded docstring."""
-    gx, gy = _mm_self(state_dict)
+    gx, gy = _mm_self(state_dict) or (0.5, 0.5)   # v2.89 None兜底(仅方位辅助)
     d = math.hypot(gx - tx, gy - ty) or 1e-6
     return (max(0.02, min(0.98, gx + (gx - tx) / d * k)),
             max(0.02, min(0.98, gy + (gy - ty) / d * k)))
@@ -206,9 +208,10 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     # ---- v2.72 dominant skills; v2.84 release rule: screen enemy boxes = fire;
     #      minimap red dot only at EXTREMELY close (<0.15) + 2-frame stable ----
     _mmr_pts0 = ((state_dict.get("minimap") or {}).get("dots") or {}).get("red") or []
-    _mm_own0 = _mm_self(state_dict) or (0.5, 0.5)
-    _d_red0 = min([math.hypot(p[0] - _mm_own0[0], p[1] - _mm_own0[1]) for p in _mmr_pts0],
-                  default=9.9)
+    _mm_own0 = _mm_self(state_dict)
+    # v2.89 红点距离只有在自己绿点已知时才有意义(泉水/未追踪=0.5,0.5兜底曾触发空放)
+    _d_red0 = (min([math.hypot(p[0] - _mm_own0[0], p[1] - _mm_own0[1]) for p in _mmr_pts0],
+                   default=9.9) if _mm_own0 else 9.9)
     if _mmr_pts0:
         cooldowns["red_stable"] = float(cooldowns.get("red_stable", 0)) + 1
     else:
@@ -296,7 +299,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     _mm_own = _mm_self(state_dict) or (0.5, 0.5)
     _d_red_near = min([math.hypot(p[0] - _mm_own[0], p[1] - _mm_own[1]) for p in _mmr_pts],
                       default=9.9)
-    if enemies or len(_mmr_pts) >= 1:
+    if enemies or enemy_bars or (_mm_own is not None and _d_red_near < 0.15):
         _nq = nearest(enemies) if enemies else None
         _dq = dist_width(_nq[0], _nq[1]) if _nq else 0.90
         _s3q = skill_states.get("3") or {}
@@ -322,7 +325,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         # 鈶鏁岃繎韬 澶嫑辩华鍏堝 -> 鈶閽-> 鈶涓鎶鑳(v2.66: 鏈夋晫璇佹嵁鍗虫斁, 璺濈涓嶆煡)
         in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= 3.5
         if ready("skill3_t", 20.0) and _s3q.get("unlocked") is not False \
-                and (_dq < 0.75 or _d_red_near < 0.40):
+                and (_dq < 0.75 or (_mm_own is not None and _d_red_near < 0.15)):
             cooldowns["skill3_t"] = now
             cooldowns["skill"] = now
             return {"type": "skill", "id": 3, "mode": "tap", "reason": "ult_near_enemy"}
