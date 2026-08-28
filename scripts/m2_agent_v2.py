@@ -1173,9 +1173,16 @@ def main():
             except Exception:
                 pass
             if phase != MatchPhase.IN_MATCH:
-                # v4.0 用户唯一权威判法: 选完英雄界面, 我的名字(金色 Starliit-001)在
-                #   上排=蓝方 / 下排=红方。金色=玩家名牌专用色(H12-42 S>110 V>140),
-                #   大厅/结算蓝色调无此金色带 -> 不再被骗。x 限 360-880 排除右侧金饰。
+                # v10.13 金名牌 ONLY 在真选人界面: 顶部中央有"等待其他玩家选择"白字
+                #   且金色名牌在名排区才判; 开局/结算/大厅的画面不误判
+                _sel_ok = False
+                try:
+                    _sel_roi = frame[10:40, 400:880]
+                    _hsv_sel = cv2.cvtColor(_sel_roi, cv2.COLOR_BGR2HSV)
+                    _wsel = ((_hsv_sel[..., 1] < 70) & (_hsv_sel[..., 2] > 200)).sum()
+                    _sel_ok = _wsel > 40   # 顶部白色标题字(等待其他玩家选择)
+                except Exception:
+                    _sel_ok = False
                 try:
                     _hsvG = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                     _HG = _hsvG[..., 0].astype(int)
@@ -1197,6 +1204,8 @@ def main():
                         _row_lock = None
                 except Exception:
                     _row_lock = None
+                if _row_lock and not _sel_ok:
+                    _row_lock = None   # 非选人界面 -> 金名牌无效
                 if _row_lock:
                     _prev_g = cooldowns.get("gold_row_prev")
                     _g_streak = int(cooldowns.get("gold_row_streak", 0))
