@@ -1034,7 +1034,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=120.0, help="run seconds")
     ap.add_argument("--forever", action="store_true",
                     help="opt")
-    ap.add_argument("--model", default=str(ROOT / "runs" / "detect" / "runs" / "detect" / "zhongkui_v5"
+    ap.add_argument("--model", default=str(ROOT / "runs" / "detect" / "zhongkui_r3"
                                            / "weights" / "best.pt"),
                     help="opt")
     ap.add_argument("--action", action="store_true",
