@@ -1,0 +1,24 @@
+{
+ "version": "v3-table",
+ "reason_value": {
+  "low_resource_safe_restore": -1.225,
+  "lane_develop_path": 0.0,
+  "follow_ally_minimap": -0.125,
+  "support_red_centroid": 0.077,
+  "retreat_low_hp": -0.153,
+  "chase_enemy_bar": -0.483,
+  "enemy_in_skill2_range": 0.44,
+  "enemy_or_minion_near": -0.172,
+  "follow_ally_minimap_path": -0.316,
+  "escape_turret": -0.23,
+  "support_red_centroid_path": 0.3,
+  "melee_attack": -0.336,
+  "chase_enemy": 0.427,
+  "follow_ally_minimap_hold": 0.436,
+  "lane_develop": -0.25,
+  "follow_ally": -0.4,
+  "avoid_turret": -0.015,
+  "wall_avoid": 0.267
+ },
+ "default": 0.0
+}

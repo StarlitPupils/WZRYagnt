@@ -35,6 +35,51 @@ def load_weights():
         pass
 
 
+# v7.0 收益标定接入(用户: 标定收益, 演算哪步收益最高做哪步)
+_AV = None
+
+
+def load_action_value():
+    """加载 configs/action_value.json (岭回归标定的特征->收益模型)。"""
+    global _AV
+    try:
+        p = ROOT / "configs" / "action_value.json"
+        if p.exists():
+            _AV = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        _AV = None
+
+
+def calibrated_value(feat=None, reason=None):
+    """v7.0 查表式标定收益: reason -> 事后平均收益 (n>=5)。未知 reason 回退 default。"""
+    if _AV is None:
+        return None
+    try:
+        table = _AV.get("reason_value") or {}
+        if reason:
+            v = table.get(reason, None)
+            if v is not None:
+                return float(v)
+            prefix = reason
+            # 前缀匹配(如 follow_ally_minimap_hold 属于 follow_ally 族)
+            for k, val in table.items():
+                if reason.startswith(k[:15] if len(k) > 15 else k):
+                    return float(val)
+        return float(_AV.get("default", 0.0))
+    except Exception:
+        return None
+
+
+def _feat_for_eval(f):
+    """从 _feat 结果转标定特征向量。"""
+    try:
+        return [f.get("hp", 1.0), f.get("n_enemy", 0), f.get("n_red", 0),
+                f.get("n_blue", 0), f.get("n_turret", 0),
+                f.get("d_turret", 1.0), f.get("in_turret_zone", 0.0)]
+    except Exception:
+        return None
+
+
 def save_weights():
     try:
         (ROOT / "configs" / "value_weights.json").write_text(
@@ -67,8 +112,17 @@ def _feat(state, hp):
             enemies_scr.append(scr)
         elif u.get("cls") == "enemy_minion":
             minions_e.append(scr)
+    # v7.0 标定特征
+    _turs = [u for u in units if u.get("cls") == "enemy_turret"]
+    _d_t = 1.0
+    if _turs:
+        _ts = _turs[0].get("screen") or [0.5, 0.5]
+        _d_t = math.hypot(_ts[0] - 0.5, _ts[1] - 0.5)
     return {"reds": reds, "blues": blues, "g": (gx, gy), "hp": hp,
-            "e_scr": enemies_scr, "e_min": minions_e}
+            "e_scr": enemies_scr, "e_min": minions_e,
+            "n_red": len(reds), "n_blue": len(blues), "n_enemy": len(enemies_scr),
+            "n_turret": len(_turs), "d_turret": _d_t,
+            "in_turret_zone": 1.0 if (_turs and _d_t < 0.45) else 0.0}
 
 
 def _grid_best(f, camp="blue"):
@@ -201,7 +255,13 @@ def evaluate(c, f, camp="blue"):
     a = c[0]
     t = a.get("type")
     gx, gy = f["g"]
-    v = 0.0
+    # v7.0 标定收益基分(查表 reason->收益, 60%) + 战术权重(40%)
+    _cv = None
+    try:
+        _cv = calibrated_value(reason=str(a.get("reason", "")))
+    except Exception:
+        _cv = None
+    v = 0.6 * float(_cv) if _cv is not None else 0.0
     if t == "map_move":
         nx, ny = a.get("nx", 0.5), a.get("ny", 0.5)
         d_red = min([math.hypot(nx - p[0], ny - p[1]) for p in f["reds"]], default=9.9)
@@ -274,3 +334,7 @@ def solve(state, fallback_action, hp, camp="blue", base_score=0.0):
         return fallback_action
     except Exception:
         return fallback_action
+
+
+# v7.0 模块加载即启用标定收益
+load_action_value()
