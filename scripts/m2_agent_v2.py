@@ -431,7 +431,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             return {"type": "map_move", "nx": ax, "ny": ay, "reason": "escape_turret"}
         ne = nearest(enemies)
         if ne is None:
-            # 鏃犳晫浜烘椂涔熶笉鏈濆鏂瑰悜璧帮紙鏈繙绂诲鏂瑰悜            ax, ay = _away_map(state_dict, tx, ty)
+            # 无敌人时也不朝敌方方向走（最远离敌方方向）
+            ax, ay = _away_map(state_dict, tx, ty)
             return {"type": "map_move", "nx": ax, "ny": ay, "reason": "avoid_turret"}
         # 鏈夋晫浜烘椂氳嫢鏁屼汉涓庡鍚屽悜涓斿濞佽儊屼粛鍙挬堥挬瀛愪笉杩涘満夛紝绉诲姩鏂瑰悜淇濇寔浣嗘爣璁        cooldowns["turret_threat"] = 1.0
     else:
