@@ -418,8 +418,15 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             return {"type": "restore", "reason": "low_resource_safe_restore"}
 
     # ---- 1) 濉旇閬匡細鏁屾柟濉斿湪杩戝鍙涓旀棤鎴戞柟忓叺(ally_minion) 鈫涓嶈繘鍏鏀诲嚮鑼冨洿 ----
-    nt = nearest(turrets)
-    turret_threat = bool(turrets) and not ally_minions and nt is not None \
+    # v7.1 塔威胁: ① 开局 8s 禁用(泉水期自家基地 yolo 误标 enemy_turret)
+    #   ② 屏中线下方(y>0.62 且 x 中)的塔 = 自家基地建筑, 不算敌塔威胁
+    #   ③ 无 ally_minion 要求 (v6.0 用户: 被塔打了要撤, 不等兵线)
+    def _is_base_building(t):
+        return t[1] > 0.62 and abs(t[0] - 0.5) < 0.32
+    _turs_f = [t for t in turrets if not _is_base_building(t)]
+    _match_age = now - float(cooldowns.get("match_start_t", 0.0))
+    nt = nearest(_turs_f) if _turs_f else None
+    turret_threat = bool(_turs_f) and nt is not None and _match_age > 8.0 \
         and dist_width(nt[0], nt[1]) < TURRET_THREAT_FRAC
     if turret_threat:
         tx, ty = nt[0], nt[1]
