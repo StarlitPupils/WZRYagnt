@@ -318,10 +318,14 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         _s3q = skill_states.get("3") or {}
         _s2q = skill_states.get("2") or {}
         _s1q = skill_states.get("1") or {}
-        # v3.5 用户连招铁律: 勾中=接召唤师+三技能小连招; 没勾中=只用一技能消耗(不接其他)
+        # v10.6 用户连招铁律: 勾中=接召唤师+三技能; 没勾中=一技能消耗
+        #   勾中判定(可靠): 勾后敌人被拉近 = 当前距离 < 出钩时距离-0.08 (敌人被拽到身前)
         hook_pending = float(cooldowns.get("hook_pending", 0.0))
+        hook_anchor = float(cooldowns.get("hook_anchor_dist", 0.45))
         hook_missed = (hook_pending > 0 and now - hook_pending > 1.2)
-        if hook_pending and now - hook_pending <= 1.2 and _dq < 0.40:
+        _hook_hit = bool(hook_pending and now - hook_pending <= 1.2
+                         and _dq is not None and _dq < min(0.42, hook_anchor - 0.06))
+        if _hook_hit:
             # 勾中 -> 召唤师 + 三技能 (用户明确小连招=召唤师+三技能, 不接一技能)
             combo = []
             if ready("summoner_t", 5.0):
