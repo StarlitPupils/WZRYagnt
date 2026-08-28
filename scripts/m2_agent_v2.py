@@ -1193,9 +1193,9 @@ def main():
                         _cnt_up = int(((_gold_y >= 40) & (_gold_y < 300)).sum())
                         _cnt_lo = int(((_gold_y >= 400) & (_gold_y < 680)).sum())
                         if _cnt_up >= 80 and _cnt_up >= _cnt_lo * 2:
-                            _row_lock = "blue"
+                            _row_lock = "red"    # v10.1 用户确认: 金色上排=红方
                         elif _cnt_lo >= 80 and _cnt_lo >= _cnt_up * 2:
-                            _row_lock = "red"
+                            _row_lock = "blue"   # 金色下排=蓝方
                         else:
                             _row_lock = None
                     else:
@@ -1329,9 +1329,9 @@ def main():
                     greens = (mm.get("dots") or {}).get("green") or []
                     if greens:
                         gx, gy = greens[0][:2]
-                        # 蓝方基地小地图右下 / 红方基地左上
-                        _cand = "blue" if (gx > 0.35 and gy > 0.35) else "red"
-                        _votes[_cand] = _votes.get(_cand, 0) + 2
+                        # v10.1 用户确认反转: 我方绿点左上(基地左上)=蓝方, 右下=红方
+                        _cand = "blue" if (gx < 0.40 and gy < 0.40) else "red"
+                        _votes[_cand] = _votes.get(_cand, 0) + 3   # 绿点=最强证据
                     try:
                         _mm0 = frame[0:232, 0:232]
                         _br = _mm0[176:232, 176:232].reshape(-1, 3).mean(axis=0)
