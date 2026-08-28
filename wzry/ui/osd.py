@@ -1,56 +1,57 @@
 # -*- coding: utf-8 -*-
-"""OSD 屏幕显示 (v10.0): 置顶小窗显示 阵营判断 + 支援方向 + 当前决策。
-用户: 判断蓝方还要写成屏幕上面 -> 用户直接看到 agent 判断结果。
-tkinter 无边框置顶 (overrideredirect + topmost), 不遮挡太多游戏画面。
+"""OSD 屏幕显示 (v10.2 健壮版): 置顶小窗显示 阵营判断 + 支援方向 + 当前决策。
+tkinter 无边框置顶; 线程安全 (首次 show 即 init 并显示)。
 """
 import threading
 import tkinter as tk
 
 _lock = threading.Lock()
-_root = None
-_label = None
+_state = {"root": None, "label": None, "started": False}
 
 
-def _init():
-    global _root, _label
-    _root = tk.Tk()
-    _root.overrideredirect(True)
-    _root.attributes("-topmost", True)
-    _root.geometry("+30+60")   # 左上角 (避开小地图)
-    _label = tk.Label(_root, text="初始化...", font=("Microsoft YaHei", 14, "bold"),
-                      fg="white", bg="#2222AA", padx=14, pady=8)
-    _label.pack()
-    # 线程守护, 主线程消息循环
-    def _loop():
+def _ensure():
+    with _lock:
+        if _state["started"]:
+            return True
         try:
-            _root.mainloop()
+            root = tk.Tk()
+            root.withdraw()
+            root.overrideredirect(True)
+            root.attributes("-topmost", True)
+            root.geometry("+30+60")
+            lbl = tk.Label(root, text="初始化...", font=("Microsoft YaHei", 13, "bold"),
+                           fg="white", bg="#2222AA", padx=12, pady=6, justify="left")
+            lbl.pack()
+            root.deiconify()
+            _state["root"] = root
+            _state["label"] = lbl
+            _state["started"] = True
+
+            def _loop():
+                try:
+                    root.mainloop()
+                except Exception:
+                    pass
+            t = threading.Thread(target=_loop, daemon=True)
+            t.start()
+            return True
         except Exception:
-            pass
-    t = threading.Thread(target=_loop, daemon=True)
-    t.start()
+            return False
 
 
 def show(camp="?", direction="", decision="", reason=""):
-    """更新 OSD 文本。camp: blue/red/?; direction: 支援方向; decision/reason: 当前决策。"""
-    global _label
+    """更新 OSD。camp: blue/red/?; direction: 支援方向; decision/reason 当前决策。"""
     try:
-        if _label is None:
-            _init()
+        if not _state["started"] and not _ensure():
             return
-        bg = "#2222AA" if camp == "blue" else ("#AA2222" if camp == "red" else "#555555")
-        txt = f"[{camp}] {direction}"
+        lbl = _state["label"]
+        if lbl is None:
+            return
+        bg = "#1A48B8" if camp == "blue" else ("#C22" if camp == "red" else "#555")
+        emoji = "[蓝方]" if camp == "blue" else ("[红方]" if camp == "red" else "[判定中]")
+        txt = f"{emoji} {direction}"
         if decision:
             txt += f"\n{decision}: {reason}"
-        with _lock:
-            _label.config(text=txt, bg=bg)
-    except Exception:
-        pass
-
-
-def close():
-    global _root
-    try:
-        if _root is not None:
-            _root.after(0, _root.destroy)
+        lbl.config(text=txt, bg=bg)
     except Exception:
         pass
