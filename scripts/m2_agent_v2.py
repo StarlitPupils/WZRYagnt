@@ -234,12 +234,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         _s3_ = _s_.get("3") or {}
         _s2_ = _s_.get("2") or {}
         _s1_ = _s_.get("1") or {}
-        if ready("skill3_t", 20.0) and _s3_.get("unlocked") is not False \
-                and _has_yolo_eh:
-            cooldowns["skill3_t"] = now
-            cooldowns["skill"] = now
-            return {"type": "skill", "id": 3, "mode": "tap", "reason": "ult_near_enemy"}
-        # v2.98 出钩铁律: 必须 yolo 敌英框 + 二技能范围内; 纯红条(暴君)不出钩
+        # v10.5 用户铁律: 碰到敌人 = 先二技能勾! 大招 ONLY 在勾中后 combo!
+        #   没勾到 = 只用一技能消耗 (大招绝不先手)
         if _nq0 is not None and _dq0 <= SKILL2_RANGE_FRAC \
                 and ready("skill2_t", SKILL2_THROTTLE_S) and _s2_.get("unlocked") is not False:
             cooldowns["skill2_t"] = now
@@ -349,13 +345,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 cooldowns["skill1_t"] = now
                 cooldowns["skill"] = now
                 return {"type": "skill", "id": 1, "mode": "tap", "reason": "hook_missed_harass"}
+        # v10.5 用户铁律: 大招只在勾中 combo! 这里绝无先手大招
         in_ult = now - float(cooldowns.get("skill3_t", 0.0)) <= 3.5
-        # 常规(无钩等待): 三技能只在近敌且未勾等待时
-        if ready("skill3_t", 20.0) and _s3q.get("unlocked") is not False \
-                and _dq < 0.75 and _has_yolo_eh_q:
-            cooldowns["skill3_t"] = now
-            cooldowns["skill"] = now
-            return {"type": "skill", "id": 3, "mode": "tap", "reason": "ult_near_enemy"}
         # v2.98 出钩铁律: yolo 敌英框 + 二技能范围内才出钩; 纯红条(暴君)不出钩
         if not in_ult and _nq is not None and _dq <= SKILL2_RANGE_FRAC \
                 and ready("skill2_t", SKILL2_THROTTLE_S) \
