@@ -290,7 +290,13 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             cooldowns["hook_pending"] = 0.0
 
     # ---- brainless fire (skills if enemy present) ----
-    _hpq = float((state_dict.get("ui") or {}).get("hp") or 1.0)
+    # v10.11 血条修复: hp=None(检测失败)不默认满血 -> 用估计/保守值; 检测帧缺失也保守
+    _hp_raw = (state_dict.get("ui") or {}).get("hp")
+    if _hp_raw is not None and _hp_raw == _hp_raw and 0.0 <= float(_hp_raw) <= 1.0:
+        _hpq = float(_hp_raw)
+    else:
+        # hp 未知: 保守估计 = 0.6 (避免"没血不回家"; 若持续检测失败会用 hp_drop 兜底)
+        _hpq = 0.6
     # v2.82 mana: measurement missing -> skill-cost estimate (0.10/skill, 12+ => recall)
     _mp_raw = (state_dict.get("ui") or {}).get("mp")
     _skill_cnt = 0
@@ -394,11 +400,19 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                       f"s3={_s3q.get('unlocked', '')} s1={_s1q.get('unlocked', '')} "
                       f"hook_pending={round(now - float(cooldowns.get('hook_pending', 0)), 1)}")
 
-    # ---- v2.44 鍩虹鑷喅绛栦笁: HP<20% 鎴MP<20% 涓斿畨鍏綅缃-> 寮哄埗鍥炲煄 (v2.74 钃濋噺涔熷洖瀹 ----
-    if _hpq < 0.20 or _mpq < 0.20:
-        _safe = not any(dist_width(s[0], s[1]) < 0.45 for s in (enemies + minions + monsters))
-        _under_my_tower = any(dist_width(t[0], t[1]) < 0.35 for t in ally_turrets)
-        if _safe and (_under_my_tower or not turrets) and ready("recall_t", 20.0):
+    # ---- v10.11 低血回家(用户: 没血必须回家!): HP<25%或MP<20% -> 必撤向泉水(敌近也撤) ----
+    if _hpq < 0.25 or _mpq < 0.20:
+        _camp_hp = cooldowns.get("camp") or "blue"
+        _fx_hp, _fy_hp = FOUNTAIN_DIR_BLUE if _camp_hp == "blue" else FOUNTAIN_DIR_RED
+        _near_pool = [s for s in (enemies + minions + monsters)
+                      if dist_width(s[0], s[1]) < 0.45]
+        if _near_pool:
+            # 敌近: 远离最近威胁 + 向泉水方向撤
+            _esc = min(_near_pool, key=lambda s: dist_width(s[0], s[1]))
+            _ax_hp, _ay_hp = _away_map(state_dict, _esc[0], _esc[1], k=0.20)
+            return {"type": "map_move", "nx": _ax_hp, "ny": _ay_hp,
+                    "reason": "retreat_low_hp_map"}
+        if ready("recall_t", 20.0):
             cooldowns["recall_t"] = now
             return {"type": "recall", "reason": "low_hp_safe_recall_15"}
 
