@@ -157,6 +157,11 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         # (comment)
         if cls in ("enemy_turret", "ally_turret") and cx < 0.18 and cy < 0.32:
             continue
+        # v8.0 用户: 塔/小兵不需要判断(红方时自家塔/小兵误标敌方, 阵营同观无法区分)
+        #   -> 完全屏蔽 塔/小兵 类(不参与决策), 只判断英雄(人)
+        if cls in ("enemy_turret", "ally_turret", "enemy_minion", "ally_minion",
+                   "enemy_crystal", "ally_crystal"):
+            continue
         if cls == "self":
             pass   # v2.46 鍏睆鑷繁涓嶆娴涓嶆樉绀 鑷繁蹇呭湪灞忓箷涓, 浠皬鍦板浘缁跨幆涓哄噯
         elif cls == "enemy_hero":
@@ -428,6 +433,28 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     nt = nearest(_turs_f) if _turs_f else None
     turret_threat = bool(_turs_f) and nt is not None and _match_age > 8.0 \
         and dist_width(nt[0], nt[1]) < TURRET_THREAT_FRAC
+    # v8.0 被塔打 = 血条急剧下降(用户铁律): 0.6s 内 hp 降 >0.18 -> 塔/单位重击 -> 强撤
+    #   不依赖阵营塔判断(塔/小兵已屏蔽), 直接看血量骤降(被打的信号)
+    _hp_prev_t = float(cooldowns.get("hp_prev_t", 0.0))
+    _hp_prev_v = float(cooldowns.get("hp_prev_v", 1.0))
+    if _hp_prev_t and now - _hp_prev_t <= 0.6 and _hp_prev_t > 0:
+        _hp_drop = _hp_prev_v - _hpq
+        if _hp_drop > 0.18 and _hpq < 0.85:
+            cooldowns["escape_t"] = now
+            cooldowns["hp_drop_t"] = now   # 标记血条急降(下方行为层读)
+    cooldowns["hp_prev_t"] = now
+    cooldowns["hp_prev_v"] = _hpq
+    # v8.0 血条急降执行: 无论有无塔, 血条骤降=被重击 -> 远离最近敌人(塔/英雄不分)
+    _hp_drop_now = (now - float(cooldowns.get("hp_drop_t", 0.0))) < 1.2
+    if _hp_drop_now and _hpq < 0.85:
+        _esc_target = None
+        _pool_esc = list(enemies) + list(_turs_f) if _turs_f else list(enemies)
+        if _pool_esc:
+            _esc_target = min(_pool_esc, key=lambda s: dist_width(s[0], s[1]))
+        if _esc_target is not None:
+            _ax3, _ay3 = _away_map(state_dict, _esc_target[0], _esc_target[1], k=0.20)
+            return {"type": "map_move", "nx": _ax3, "ny": _ay3,
+                    "reason": "hp_drop_escape"}
     if turret_threat:
         tx, ty = nt[0], nt[1]
         # 宸插湪濉旀敾鍑昏寖鍥村唴堝涓績 < ESCAPE_FRAC夆啋 绔嬪嵆鍙嶅悜閫冪堢敤鎴峰弽棣堬細琚鎵撲笉鐭亾鍑哄幓        if dist_width(tx, ty) < TURRET_ESCAPE_FRAC:
