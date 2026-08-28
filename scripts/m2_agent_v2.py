@@ -995,7 +995,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=120.0, help="run seconds")
     ap.add_argument("--forever", action="store_true",
                     help="opt")
-    ap.add_argument("--model", default=str(ROOT / "runs" / "detect" / "zhongkui_11cls"
+    ap.add_argument("--model", default=str(ROOT / "runs" / "detect" / "runs" / "detect" / "zhongkui_v5"
                                            / "weights" / "best.pt"),
                     help="opt")
     ap.add_argument("--action", action="store_true",
@@ -1216,6 +1216,26 @@ def main():
             if tracker is None:
                 tracker = make_tracker(frame)
             mm = tracker.update(frame)
+            # v5.0 模型小地图点融合: yolo v5 直接检测小地图上的 mm_red/mm_blue/mm_green
+            #   -> 模型输出作为权威红/蓝/绿点 (mm_rules 硬规则退为兜底)
+            try:
+                if hasattr(det, "detect_minimap"):
+                    _mm_crop = frame[0:232, 0:232]
+                    _mmdets = det.detect_minimap(_mm_crop)
+                    _md = _mmdets or []
+                    _mred = [d for d in _md if d.cls == "mm_red" and d.conf >= 0.60]
+                    _mblue = [d for d in _md if d.cls == "mm_blue" and d.conf >= 0.60]
+                    _mgreen = [d for d in _md if d.cls == "mm_green" and d.conf >= 0.60]
+                    if _mred or _mblue or _mgreen:
+                        _msz = 232.0
+                        def _mm_n(d):
+                            return [round(d.center[0] / _msz, 4),
+                                    round(d.center[1] / _msz, 4), round(d.conf, 2)]
+                        mm["dots"]["red"] = [_mm_n(d) for d in _mred] or mm["dots"]["red"]
+                        mm["dots"]["blue"] = [_mm_n(d) for d in _mblue] or mm["dots"]["blue"]
+                        mm["dots"]["green"] = [_mm_n(d) for d in _mgreen] or mm["dots"]["green"]
+            except Exception:
+                pass
             if not mm["found"]:
                 if not confirmed:
                     confirm_streak = 0

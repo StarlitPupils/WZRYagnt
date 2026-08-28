@@ -117,6 +117,37 @@ class YoloDetector:
             ))
         return hero_dedup_ui(camp_correct(frame, dets))
 
+    def detect_minimap(self, mm_crop: np.ndarray, conf=0.25) -> List[Det]:
+        """v5.0 小地图点检测: 对 232x232 小地图裁剪跑模型, 只提取 mm_* 类。
+        返回 Det(坐标=裁剪内像素), 供 mm_tracker 直接用模型红/蓝/绿点。
+        mm 类: 12 mm_red 13 mm_blue 14 mm_green (15 mm_yellow)。"""
+        t0 = time.perf_counter()
+        out: List[Det] = []
+        try:
+            results = self.model.predict(mm_crop, conf=conf, iou=self.iou,
+                                         device=self.device, verbose=False,
+                                         half=self.half)[0]
+            self.last_mm_ms = (time.perf_counter() - t0) * 1000.0
+            if results.boxes is None:
+                return out
+            boxes = results.boxes.xyxy.cpu().numpy()
+            confs = results.boxes.conf.cpu().numpy()
+            cls_ids = results.boxes.cls.cpu().numpy().astype(int)
+            names = results.names
+            for box, c, cid in zip(boxes, confs, cls_ids):
+                nm = names[cid]
+                if not nm.startswith("mm_"):
+                    continue
+                x1, y1, x2, y2 = (float(v) for v in box)
+                out.append(Det(
+                    cls=nm, conf=float(c),
+                    xyxy=[x1, y1, x2, y2],
+                    center=[(x1 + x2) / 2, (y1 + y2) / 2],
+                ))
+        except Exception:
+            pass
+        return out
+
 
 def _iou(a, b):
     ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
