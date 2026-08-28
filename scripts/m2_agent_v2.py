@@ -322,9 +322,22 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         #   勾中判定(可靠): 勾后敌人被拉近 = 当前距离 < 出钩时距离-0.08 (敌人被拽到身前)
         hook_pending = float(cooldowns.get("hook_pending", 0.0))
         hook_anchor = float(cooldowns.get("hook_anchor_dist", 0.45))
-        hook_missed = (hook_pending > 0 and now - hook_pending > 1.2)
-        _hook_hit = bool(hook_pending and now - hook_pending <= 1.2
-                         and _dq is not None and _dq < min(0.42, hook_anchor - 0.06))
+        hook_missed = (hook_pending > 0 and now - hook_pending > 2.5)
+        # v10.7 勾中判定放宽+血条证据: 勾中=敌英被拉近(距离<锚点) OR 敌英血条出现/下降
+        _hook_hit = False
+        if hook_pending and 0 < now - hook_pending <= 1.2 and _nq is not None:
+            _shrunk = _dq < min(0.45, hook_anchor - 0.04)   # 被拉近
+            _nbar = None
+            try:
+                _bars = state_dict.get("extra") or {}
+                _eb = _bars.get("enemy_bars") or []
+                if _eb:
+                    _nbar = True
+            except Exception:
+                _nbar = None
+            _hit_any = _shrunk or (_nbar and _dq < 0.42)
+            if _hit_any:
+                _hook_hit = True
         if _hook_hit:
             # 勾中 -> 召唤师 + 三技能 (用户明确小连招=召唤师+三技能, 不接一技能)
             combo = []
@@ -621,42 +634,15 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 if na_tmp is not None:
                     target = (na_tmp[0], na_tmp[1])
                     reason = "follow_ally_lowhp"
-            # v3.1 用户铁律: 不蹲草! 支援=去队友身边, 红点近也在移动中->交给技能块/移动
-            if target is None and na is not None and not in_opening:
-                # 璺熷皠鎵闃熷弸氬睆骞ally_hero 鐩存帴璺熼殢涜创杩戝埌 0.12 灞忓鎵嶅仠(鐢埛鍑犱箮涓嶅仠)
-                d_ally = dist_width(na[0], na[1])
-                if d_ally < 0.12 and not mm_red:
-                    return {"type": "none", "reason": "follow_ally_hold"}
-                # v3.0 支援=跟随队友(用户): 屏内队友无条件跟(三条路都支援), 只避河道中央站桩
-                target = (na[0], na[1])
-                reason = "follow_ally"
-            elif mm_blue and not in_opening:
-                # 璺熼槦鐩爣: 涓嬭矾璧板粖钃濈偣浼樺厛(勬墜), 娆￠変腑璺 璐績(闃插崟鐐逛吉妫)
-                _down_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
-                _mid_blue = [p for p in mm_blue if _corridor(p, _mid_c, 0.35)]
-                # v3.0 支援=跟随队友: 发育路/中路走廊蓝点优先, 无则跟最近蓝点(三条路都支援);
-                #      河道中央带(r<0.10 距0.5,0.5)蓝点不跟(队友在河道=不陪他站桩, 去发育路)
-                _pool_b = _down_blue or _mid_blue
-                if not _pool_b:
-                    _sg3 = (mm.get("dots") or {}).get("green") or []
-                    _px3, _py3 = (_sg3[0][:2] if _sg3 else (0.5, 0.5))
-                    _nb3 = min(mm_blue, key=lambda p: (p[0]-_px3)**2 + (p[1]-_py3)**2)
-                    if math.hypot(_nb3[0]-0.5, _nb3[1]-0.5) < 0.10:
-                        lx, ly = lane
-                        target = (lx, ly)
-                        reason = "lane_develop_hold"
-                    else:
-                        target = (_nb3[0], _nb3[1])
-                        reason = "follow_ally_minimap"
-                else:
-                    lx = sum(p[0] for p in _pool_b) / len(_pool_b)
-                    ly = sum(p[1] for p in _pool_b) / len(_pool_b)
-                    target = (lx, ly)
-                    reason = "follow_ally_minimap"
-            else:
-                lx, ly = lane
-                target = (lx, ly)
-                reason = "lane_develop"
+            # v10.8 删旧跟队覆盖块: DPS路支援(上方)是唯一支持逻辑, 旧v3.0/v3.1覆盖已删除
+            if target is None and not in_opening:
+                _sg3 = (mm.get("dots") or {}).get("green") or []
+                _px3, _py3 = (_sg3[0][:2] if _sg3 else (0.5, 0.5))
+                # 无走廊队友/敌人 -> 射手推进线
+                _push = (_down_c[0] + (0.10 if _camp0 == "blue" else -0.10),
+                         _down_c[1] + (0.10 if _camp0 == "blue" else -0.10))
+                target = (_push[0], _push[1])
+                reason = "dps_lane_push"
     # v3.2 用户兜底铁律: 决策不明时跟随队友去清兵线(不空转/不河道游荡)
     if reason == "lane_develop" or reason == "lane_develop_hold":
         if ally_minions:
