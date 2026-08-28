@@ -1174,9 +1174,9 @@ def main():
                         _cnt_up = int(((_gold_y >= 40) & (_gold_y < 300)).sum())
                         _cnt_lo = int(((_gold_y >= 400) & (_gold_y < 680)).sum())
                         if _cnt_up >= 80 and _cnt_up >= _cnt_lo * 2:
-                            _row_lock = "red"    # v10.1 用户确认: 金色上排=红方
+                            _row_lock = "blue"   # v10.9 恢复: 金色上排=蓝方
                         elif _cnt_lo >= 80 and _cnt_lo >= _cnt_up * 2:
-                            _row_lock = "blue"   # 金色下排=蓝方
+                            _row_lock = "red"    # 金色下排=红方
                         else:
                             _row_lock = None
                     else:
@@ -1310,8 +1310,8 @@ def main():
                     greens = (mm.get("dots") or {}).get("green") or []
                     if greens:
                         gx, gy = greens[0][:2]
-                        # v10.1 用户确认反转: 我方绿点左上(基地左上)=蓝方, 右下=红方
-                        _cand = "blue" if (gx < 0.40 and gy < 0.40) else "red"
+                        # v10.9 实测正确: 绿点右下=蓝方基地(真实王者), 左上=红方
+                        _cand = "blue" if (gx > 0.40 and gy > 0.40) else "red"
                         _votes[_cand] = _votes.get(_cand, 0) + 3   # 绿点=最强证据
                     try:
                         _mm0 = frame[0:232, 0:232]
