@@ -632,7 +632,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             reason = "follow_ally_clearlane"
         elif mm_blue:
             _sgf = (mm.get("dots") or {}).get("green") or []
-            _fx, _fy = _sgf[0] if _sgf else (0.5, 0.5)
+            _fx, _fy = (_sgf[0][:2] if _sgf else (0.5, 0.5))   # v5.1 模型注入点含conf
             _nbf = min(mm_blue, key=lambda p: (p[0]-_fx)**2 + (p[1]-_fy)**2)
             target = (_nbf[0], _nbf[1])
             reason = "follow_ally_minimap"
@@ -684,7 +684,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
     greens = mmp_dots.get("green") or []
     blues = mmp_dots.get("blue") or []
     reds_ = mmp_dots.get("red") or []
-    gx, gy = greens[0] if greens else (0.5, 0.5)
+    gx, gy = (greens[0][:2] if greens else (0.5, 0.5))
     nx, ny = target[0], target[1]
     if reason.startswith(("follow_ally_minimap", "support", "lane", "follow_ally_lowhp")):
         pass  # 宸叉槸鍦板浘鍧愭爣
@@ -1288,7 +1288,7 @@ def main():
                     _cand = None
                     greens = (mm.get("dots") or {}).get("green") or []
                     if greens:
-                        gx, gy = greens[0]
+                        gx, gy = greens[0][:2]
                         # 蓝方基地小地图右下 / 红方基地左上
                         _cand = "blue" if (gx > 0.35 and gy > 0.35) else "red"
                         _votes[_cand] = _votes.get(_cand, 0) + 2
