@@ -559,7 +559,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             #      队友蓝点在身边(走廊内/任意)就去队友处; 只有完全无蓝点才考虑走廊红点支援
             if not in_opening and mm_blue:
                 self_g = (mm.get("dots") or {}).get("green") or []
-                myx, myy = self_g[0] if self_g else (0.5, 0.5)
+                myx, myy = (self_g[0][:2] if self_g else (0.5, 0.5))
                 _down_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
                 _mid_blue = [p for p in mm_blue if _corridor(p, _mid_c, 0.35)]
                 _pool_b = _down_blue or _mid_blue or mm_blue
@@ -570,7 +570,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             elif not in_opening and mm_red and hp >= _u_eng_hp:
                 # 无任何队友蓝点 -> 走廊红点支援(发育路/中路), 河道红点不去
                 self_g = (mm.get("dots") or {}).get("green") or []
-                myx, myy = self_g[0] if self_g else (0.5, 0.5)
+                myx, myy = (self_g[0][:2] if self_g else (0.5, 0.5))
                 _down_reds = [p for p in mm_red if _corridor(p, _down_c)]
                 _mid_reds = [p for p in mm_red if _corridor(p, _mid_c)]
                 _pool = _down_reds or _mid_reds
@@ -606,7 +606,7 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                 _pool_b = _down_blue or _mid_blue
                 if not _pool_b:
                     _sg3 = (mm.get("dots") or {}).get("green") or []
-                    _px3, _py3 = _sg3[0] if _sg3 else (0.5, 0.5)
+                    _px3, _py3 = (_sg3[0][:2] if _sg3 else (0.5, 0.5))
                     _nb3 = min(mm_blue, key=lambda p: (p[0]-_px3)**2 + (p[1]-_py3)**2)
                     if math.hypot(_nb3[0]-0.5, _nb3[1]-0.5) < 0.10:
                         lx, ly = lane
@@ -1228,9 +1228,10 @@ def main():
                     _mgreen = [d for d in _md if d.cls == "mm_green" and d.conf >= 0.60]
                     if _mred or _mblue or _mgreen:
                         _msz = 232.0
+                        # v5.2 统一2元组输出(弃conf): 老代码全部按(x,y)解包, 带conf会崩
                         def _mm_n(d):
                             return [round(d.center[0] / _msz, 4),
-                                    round(d.center[1] / _msz, 4), round(d.conf, 2)]
+                                    round(d.center[1] / _msz, 4)]
                         mm["dots"]["red"] = [_mm_n(d) for d in _mred] or mm["dots"]["red"]
                         mm["dots"]["blue"] = [_mm_n(d) for d in _mblue] or mm["dots"]["blue"]
                         mm["dots"]["green"] = [_mm_n(d) for d in _mgreen] or mm["dots"]["green"]
