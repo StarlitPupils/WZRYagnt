@@ -1537,7 +1537,12 @@ def main():
                 from wzry.vision.self_bars import hero_bar_check
                 _kept_u = []
                 for _u in state_dict.get("units") or []:
-                    if _u.get("cls") != "enemy_hero":
+                    _ucls = str(_u.get("cls", ""))
+                    # v8.1 塔/小兵/水晶 一律屏蔽(红方误标自家为敌方, 阵营同观不分) -> 只留英雄
+                    if _ucls in ("enemy_turret", "ally_turret", "enemy_minion",
+                                 "ally_minion", "enemy_crystal", "ally_crystal"):
+                        continue
+                    if _ucls != "enemy_hero":
                         _kept_u.append(_u)
                         continue
                     _s = _u.get("screen") or [0.5, 0.5, 0.05, 0.05]
