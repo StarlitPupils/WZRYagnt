@@ -1835,6 +1835,20 @@ def main():
                 except Exception:
                     pass
                 vis = vis_out if vis_out is not None else frame.copy()
+                # v10.4 阵营显示在窗口上 (用户: 蓝方红方写在行为/得分旁边)
+                try:
+                    _oc = cooldowns.get("camp") or ""
+                    _osd_txt = "蓝方 BLUE" if _oc == "blue" else ("红方 RED" if _oc == "red" else "判定中")
+                    _ost_col = (255, 120, 0) if _oc == "blue" else ((0, 60, 255) if _oc == "red" else (200, 200, 200))
+                    cv2.rectangle(vis, (10, 60), (230, 100), (0, 0, 0), -1)
+                    cv2.putText(vis, _osd_txt, (20, 88), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.9, _ost_col, 2)
+                    # 支援方向
+                    _dps_txt2 = "支援: 下路(射手)" if _oc == "blue" else ("支援: 上路(射手)" if _oc == "red" else "支援: 判定中")
+                    cv2.putText(vis, _dps_txt2.encode("ascii", "ignore").decode() or "support",
+                                (20, 122), cv2.FONT_HERSHEY_SIMPLEX, 0.6, _ost_col, 1)
+                except Exception:
+                    pass
                 cv2.imshow("m2-agent-v2", vis)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
