@@ -596,33 +596,32 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             na = nearest(allies)
             # v3.2 支援=跟随队友(用户铁律): 小地图红点不可作为支援目标(检测不准);
             #      队友蓝点在身边(走廊内/任意)就去队友处; 只有完全无蓝点才考虑走廊红点支援
-            if not in_opening and mm_blue:
+            # v10.3 用户铁律: 支援=射手路(蓝方=下路/红方=上路), 射手在哪跟哪, 不去对抗路/河道
+            if not in_opening:
                 self_g = (mm.get("dots") or {}).get("green") or []
                 myx, myy = (self_g[0][:2] if self_g else (0.5, 0.5))
-                _down_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
-                _mid_blue = [p for p in mm_blue if _corridor(p, _mid_c, 0.35)]
-                _pool_b = _down_blue or _mid_blue or mm_blue
-                _trb = min(_pool_b, key=lambda p: (p[0]-myx) ** 2 + (p[1]-myy) ** 2)
-                target = (_trb[0], _trb[1])
-                reason = "support_ally_engaged" if (_corridor(_trb, _down_c, 0.35)
-                                                    or _corridor(_trb, _mid_c, 0.35)) else "follow_ally_minimap"
-            elif not in_opening and mm_red and hp >= _u_eng_hp:
-                # 无任何队友蓝点 -> 走廊红点支援(发育路/中路), 河道红点不去
-                self_g = (mm.get("dots") or {}).get("green") or []
-                myx, myy = (self_g[0][:2] if self_g else (0.5, 0.5))
-                _down_reds = [p for p in mm_red if _corridor(p, _down_c)]
-                _mid_reds = [p for p in mm_red if _corridor(p, _mid_c)]
-                _pool = _down_reds or _mid_reds
-                tr = min(_pool, key=lambda p: (p[0] - myx) ** 2 + (p[1] - myy) ** 2) \
-                    if _pool else None
-                d_red = math.hypot(tr[0] - myx, tr[1] - myy) if tr else 9.9
-                if tr is not None and d_red < 0.60:
-                    target = (tr[0], tr[1])
-                    reason = "support_red_nearest"
+                # 1) 射手走廊内队友蓝点(射手在哪跟哪) - 只跟射手走廊的队友
+                _pool_blue = [p for p in mm_blue if _corridor(p, _down_c, 0.35)]
+                if _pool_blue:
+                    _trb = min(_pool_blue, key=lambda p: (p[0]-myx) ** 2 + (p[1]-myy) ** 2)
+                    target = (_trb[0], _trb[1])
+                    reason = "support_dps_lane"
                 else:
-                    target = None
-            if target is None and not in_opening and mm_red and hp < _u_eng_hp:
-                # low hp: follow ally
+                    # 2) 射手走廊内红点(敌人在射手路) -> 支援那里
+                    _pool_red = [p for p in mm_red if _corridor(p, _down_c, 0.35)]
+                    if _pool_red and hp >= _u_eng_hp:
+                        tr = min(_pool_red, key=lambda p: (p[0]-myx)**2 + (p[1]-myy)**2)
+                        d_red = math.hypot(tr[0]-myx, tr[1]-myy) if tr else 9.9
+                        if d_red < 0.60:
+                            target = (tr[0], tr[1])
+                            reason = "support_dps_lane_red"
+                    # 3) 无队友/无敌人也去射手推进线(不空转/不等分)
+                    if target is None:
+                        _push = (_down_c[0] + (0.10 if _camp0 == "blue" else -0.10),
+                                 _down_c[1] + (0.10 if _camp0 == "blue" else -0.10))
+                        target = (_push[0], _push[1])
+                        reason = "dps_lane_push"
+            if target is None and not in_opening and hp < _u_eng_hp:
                 na_tmp = nearest(allies)
                 if na_tmp is not None:
                     target = (na_tmp[0], na_tmp[1])
@@ -707,7 +706,8 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
                   "lane_develop_path", "follow_ally_lowhp_hold",
                   "follow_ally_minimap_path", "support_red_nearest_path",
                   "support_ally_engaged_path", "lane_develop_hold",
-                  "follow_ally_clearlane", "follow_ally"):
+                  "follow_ally_clearlane", "follow_ally",
+                  "support_dps_lane", "support_dps_lane_red", "dps_lane_push"):
         return {"type": "map_move", "nx": max(0.02, min(0.98, target[0])),
                 "ny": max(0.02, min(0.98, target[1])), "reason": reason}
     # dual-track movement
@@ -1356,9 +1356,15 @@ def main():
                     camp = "blue" if _bv > _rv else "red"
                     cooldowns["camp"] = camp
                     cooldowns.pop("camp_votes", None)
+                    _dps_txt = ("下路(射手)" if camp == "blue" else "上路(射手)")
                     print(f"[{datetime.now():%H:%M:%S}] 阵营判断: {'蓝方' if camp == 'blue' else '红方'}"
-                          f"(票 蓝{_bv}/红{_rv}) "
-                          f"→ 发育路方向 {LANE_DIR_BLUE if camp == 'blue' else LANE_DIR_RED}")
+                          f"(票 蓝{_bv}/红{_rv}) → 支援{_dps_txt} "
+                          f"{LANE_DIR_BLUE if camp == 'blue' else LANE_DIR_RED}")
+                    try:
+                        from wzry.ui.osd import show as _osd
+                        _osd(camp, f"支援{_dps_txt}", "阵营", f"{'蓝方' if camp == 'blue' else '红方'}")
+                    except Exception as _e:
+                        print(f"[OSD] init fail: {_e}")
                 else:
                     print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 采样中(蓝{_bv}/红{_rv}), 未锁")
 
@@ -1615,6 +1621,14 @@ def main():
 
             # ---- 瑙勫垯鍐崇瓥 + v2.40 鏈浼樺喅绛栧櫒(鏋氫妇鍊欓>浠峰艰瘎浼>閫夋渶浼 <2ms) ----
             action = decide(state_dict, cooldowns)
+            try:
+                from wzry.ui.osd import show as _osd2
+                _osd2(cooldowns.get("camp") or "?",
+                      ("支援下路(射手)" if cooldowns.get("camp") == "blue"
+                       else "支援上路(射手)" if cooldowns.get("camp") == "red" else "判定中"),
+                      str(action.get("type", "")), str(action.get("reason", ""))[:24])
+            except Exception:
+                pass
             try:
                 from wzry.decision.optimizer import solve as _solve
                 _hp0 = float((state_dict.get("ui") or {}).get("hp") or 1.0)
