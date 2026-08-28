@@ -1312,56 +1312,11 @@ def main():
                 except Exception:
                     pass
 
-            # ---- 寮灞闃佃惀鍒柇 v3.2: 多帧投票制(单帧易误判->红方被送对抗路) ----
-            # 票源: ① 小地图自已绿点基地角落(右下=蓝 左上=红) 权重2 ② 小地图角落水晶色 权重1
-            #   ③ 屏幕中心泉水ROI 权重1; 连续投票多数>=3 才锁; 锁前一律走发育路中立方向等待
-            if not cooldowns.get("camp"):
-                _votes = cooldowns.setdefault("camp_votes", {"blue": 0, "red": 0})
-                _vote_t = float(cooldowns.get("camp_vote_t", 0.0))
-                if now - _vote_t > 0.4:   # 0.4s 采样间隔
-                    cooldowns["camp_vote_t"] = now
-                    _cand = None
-                    greens = (mm.get("dots") or {}).get("green") or []
-                    if greens:
-                        gx, gy = greens[0][:2]
-                        # v10.10 用户确认(红方): 绿点左上=蓝方基地区域, 右下=红方
-                        _cand = "blue" if (gx < 0.40 and gy < 0.40) else "red"
-                        _votes[_cand] = _votes.get(_cand, 0) + 3   # 绿点=最强证据
-                    try:
-                        _mm0 = frame[0:232, 0:232]
-                        _br = _mm0[176:232, 176:232].reshape(-1, 3).mean(axis=0)
-                        _tl = _mm0[0:56, 0:56].reshape(-1, 3).mean(axis=0)
-                        _cand2 = None
-                        if _br[0] > _br[2] * 1.05 and _br[0] > _tl[0]:
-                            _cand2 = "blue"
-                        elif _tl[2] > _tl[0] * 1.05 and _tl[2] > _br[2]:
-                            _cand2 = "red"
-                        if _cand2:
-                            _votes[_cand2] = _votes.get(_cand2, 0) + 1
-                    except Exception:
-                        pass
-                    if _cand is None:
-                        from wzry.vision.camp import detect_camp_from_center
-                        _cand3 = detect_camp_from_center(frame)
-                        if _cand3:
-                            _votes[_cand3] = _votes.get(_cand3, 0) + 1
-                _bv = int(_votes.get("blue", 0))
-                _rv = int(_votes.get("red", 0))
-                if max(_bv, _rv) >= 4 and _bv != _rv:
-                    camp = "blue" if _bv > _rv else "red"
-                    cooldowns["camp"] = camp
-                    cooldowns.pop("camp_votes", None)
-                    _dps_txt = ("下路(射手)" if camp == "blue" else "上路(射手)")
-                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: {'蓝方' if camp == 'blue' else '红方'}"
-                          f"(票 蓝{_bv}/红{_rv}) → 支援{_dps_txt} "
-                          f"{LANE_DIR_BLUE if camp == 'blue' else LANE_DIR_RED}")
-                    try:
-                        from wzry.ui.osd import show as _osd
-                        _osd(camp, f"支援{_dps_txt}", "阵营", f"{'蓝方' if camp == 'blue' else '红方'}")
-                    except Exception as _e:
-                        print(f"[OSD] init fail: {_e}")
-                else:
-                    print(f"[{datetime.now():%H:%M:%S}] 阵营判断: 采样中(蓝{_bv}/红{_rv}), 未锁")
+            # ---- v10.12 用户铁律: 阵营 ONLY by 选人界面金名牌!(绿点检测完全删除, 不可信) ----
+            #   金名牌已在上方 phase!=IN_MATCH 锁定 (上排=蓝/下排=红), 这里不覆盖/不投票
+            if not cooldowns.get("camp") and not cooldowns.get("camp_from_gold"):
+                # 金名牌还没锁(选人页未过) -> 不判, 默认蓝(等选人页或下一步); 绝不用绿点
+                pass
 
             # ---- 寮灞闃靛璇嗗埆坴2.10歮odlens 璇婚夎嫳闆勭晫闈枃瀛楋紝鍚挓棣椾晶=鎴戞柟---
             # 鐢悗鍙扮嚎绋嬮伩鍏嶉樆濉炰富寰幆涚粨鏋滃瓨鍏cooldowns["roster"]
