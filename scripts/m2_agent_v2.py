@@ -539,20 +539,25 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         target = (ne[0], ne[1])
         reason = "chase_enemy"
     else:
-        # enemy bar chase (hysteresis)
+        # v8.2 用户铁律: 追血条=负收益(-0.48)且小地图红点不可信 -> 绝不因红点去追!
+        #   仅当屏内已有真敌英(yolo enemy_hero)时, 血条追可作为持续跟踪; 无屏内敌英=不追
         mm0 = state_dict.get("minimap") or {}
         mm_red0 = (mm0.get("dots") or {}).get("red") or [] if mm0.get("found") else []
         bar_hold = now - float(cooldowns.get("bar_chase_t", 0.0)) < 1.5
-        if enemy_bars and mm_red0:
+        if enemy_bars and enemies:
+            # 有屏内敌英才允许血条追踪(近敌视野内), 且追踪方向=敌英方向(非红点)
             nearest_bar = min(enemy_bars, key=lambda b: math.hypot(
                 b[0] / w - 0.5, (b[1] / h - 0.5) * (h / w)))
             bx, by = nearest_bar[0] / w, nearest_bar[1] / h
+            _ne = nearest(enemies)
+            if _ne is not None:
+                bx, by = _ne[0], _ne[1]   # 用真敌英位置(修正血条坐标偏差)
             if 0.0 <= bx <= 1.0 and 0.0 <= by <= 1.0:
                 target = (bx, by)
                 reason = "chase_enemy_bar"
                 cooldowns["bar_chase_t"] = now
                 cooldowns["bar_target"] = (bx, by)
-        elif bar_hold and cooldowns.get("bar_target") and mm_red0:
+        elif bar_hold and cooldowns.get("bar_target") and enemies:
             target = tuple(cooldowns["bar_target"])
             reason = "chase_enemy_bar"
         if target is None:
