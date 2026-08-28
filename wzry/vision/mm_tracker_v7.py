@@ -242,6 +242,22 @@ class MMTrackerV7:
         heroes_enemy = sorted(heroes["enemy"], key=lambda p: -p[2])[:5]
         heroes_ally = sorted(heroes["ally"], key=lambda p: -p[2])[:4]
         heroes_self = heroes["self"][:1]
+        # v4.1 ROI 分类器门控: 小地图候选抠图过训练分类器, 类目不符剔除
+        #   (mm_red才算敌英/mm_blue才算队友/mm_green才算自己; 假红点/假蓝点被纠正)
+        try:
+            from wzry.vision.roi_cls_gate import filter_dots
+            _mm_crop = frame[0:int(msz), 0:int(msz)]
+            _r0, _b0, _g0 = filter_dots(
+                _mm_crop,
+                [(p[0] / msz, p[1] / msz, p[2]) for p in heroes_enemy],
+                [(p[0] / msz, p[1] / msz, p[2]) for p in heroes_ally],
+                [(p[0] / msz, p[1] / msz, p[2]) for p in heroes_self],
+                size=int(msz))
+            heroes_enemy = [(p[0] * msz, p[1] * msz, p[2]) for p in _r0]
+            heroes_ally = [(p[0] * msz, p[1] * msz, p[2]) for p in _b0]
+            heroes_self = [(p[0] * msz, p[1] * msz, p[2]) for p in _g0]
+        except Exception:
+            pass
         legacy_dots = {
             "blue": [[p[0] / msz, p[1] / msz] for p in heroes_ally],
             "red": [[p[0] / msz, p[1] / msz] for p in heroes_enemy],

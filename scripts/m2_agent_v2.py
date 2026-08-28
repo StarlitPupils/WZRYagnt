@@ -1377,6 +1377,33 @@ def main():
                     _bh = d.xyxy[3] - d.xyxy[1]
                     return not (_bw > 215 or _bh > 270)
                 dets = [d for d in dets if _not_beast(d)]
+                # v4.1 屏幕候选过 ROI 分类器: enemy_hero 抠图必须被判 enemy_hero(>=0.60)
+                #   neutral_monster/self/ally -> 剔除(野怪/队友/自己误标为敌英的根治)
+                try:
+                    from wzry.vision.roi_cls_gate import classify_roi
+                    _dets2 = []
+                    for _d in dets:
+                        if _d.cls == "enemy_hero":
+                            x1, y1, x2, y2 = [int(v) for v in _d.xyxy]
+                            _pad = max(6, (y2 - y1) // 8)
+                            roi = frame[max(0, y1 - _pad):y2 + _pad,
+                                        max(0, x1 - _pad):x2 + _pad]
+                            if roi.size == 0:
+                                continue
+                            roi = cv2.resize(roi, (96, 96), interpolation=cv2.INTER_AREA)
+                            _nm, _nc = classify_roi(roi)
+                            if _nm == "enemy_hero" and _nc >= 0.60:
+                                _dets2.append(_d)
+                            elif _nm is None:
+                                _dets2.append(_d)   # 分类器故障不拦截
+                            elif _nm == "neutral_monster" and _nc >= 0.60:
+                                continue            # 野怪(暴君/龙) -> 剔除, 不打野怪
+                            # else: self/ally/蓝绿 -> 保留(场上有自己/队友, 不误剔)
+                        else:
+                            _dets2.append(_d)
+                    dets = _dets2
+                except Exception:
+                    pass
             except Exception:
                 pass
             # hero identity bar-top color guard
