@@ -1,0 +1,321 @@
+{
+ "version": "v11",
+ "n": 2465,
+ "buckets": {
+  "hp=low|en=0|red=0|blue=2|d=0": {
+   "no_target": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.065
+  },
+  "hp=low|en=0|red=0|blue=1|d=0": {
+   "no_target": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=0|red=0|blue=0|d=0": {
+   "no_target": 0.0,
+   "dps_lane_push": 0.0
+  },
+  "hp=mid|en=0|red=0|blue=0|d=0": {
+   "retreat_low_hp_map": 0.0
+  },
+  "hp=high|en=0|red=0|blue=1|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=high|en=0|red=0|blue=0|d=0": {
+   "dps_lane_push": 0.0
+  },
+  "hp=high|en=0|red=0|blue=2|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=high|en=0|red=0|blue=3|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0,
+   "hook_flight": 0.0
+  },
+  "hp=low|en=0|red=0|blue=3|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=0|red=0|blue=4|d=0": {
+   "dps_lane_push": 0.0,
+   "hook_flight": 0.0,
+   "support_dps_lane": 0.181
+  },
+  "hp=high|en=1|red=0|blue=4|d=0": {
+   "enemy_in_skill2_range": 0.0,
+   "enemy_hero_near": 0.0
+  },
+  "hp=high|en=0|red=0|blue=4|d=0": {
+   "support_dps_lane": 0.0,
+   "dps_lane_push": 0.0
+  },
+  "hp=low|en=0|red=1|blue=4|d=0": {
+   "support_dps_lane": -0.021,
+   "hook_flight": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=high|en=0|red=1|blue=4|d=0": {
+   "support_dps_lane": 0.0,
+   "hook_flight": 0.0,
+   "low_resource_safe_restore": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=low|en=0|red=1|blue=3|d=0": {
+   "support_dps_lane": -0.269,
+   "dps_lane_push": 0.429,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=high|en=0|red=1|blue=3|d=0": {
+   "support_dps_lane": 0.0,
+   "hook_flight": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0,
+   "low_resource_safe_restore": 0.0
+  },
+  "hp=high|en=0|red=1|blue=2|d=0": {
+   "support_dps_lane": -0.058,
+   "dps_lane_push": 0.0,
+   "hook_flight": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=high|en=0|red=2|blue=4|d=0": {
+   "support_dps_lane": 0.0,
+   "dps_lane_push": 0.0
+  },
+  "hp=low|en=0|red=2|blue=4|d=0": {
+   "support_dps_lane": 0.0,
+   "dps_lane_push": 0.0
+  },
+  "hp=high|en=0|red=2|blue=2|d=0": {
+   "support_dps_lane": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=high|en=0|red=2|blue=3|d=0": {
+   "support_dps_lane": 0.0,
+   "hook_flight": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=high|en=1|red=2|blue=3|d=0": {
+   "enemy_in_skill2_range": 0.0,
+   "enemy_hero_near": 0.0
+  },
+  "hp=low|en=0|red=2|blue=3|d=0": {
+   "support_dps_lane": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=high|en=0|red=3|blue=4|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=high|en=0|red=3|blue=3|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=1|red=0|blue=3|d=0": {
+   "enemy_in_skill2_range": 0.0,
+   "chase_enemy": 0.0
+  },
+  "hp=low|en=1|red=0|blue=4|d=0": {
+   "enemy_in_skill2_range": 0.0
+  },
+  "hp=low|en=0|red=3|blue=2|d=0": {
+   "support_dps_lane_red": 0.0,
+   "dps_lane_push": 0.0
+  },
+  "hp=low|en=0|red=3|blue=4|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=0|red=1|blue=2|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0,
+   "support_dps_lane": 0.034,
+   "hook_flight": 0.0
+  },
+  "hp=low|en=1|red=1|blue=3|d=0": {
+   "enemy_in_skill2_range": 0.0,
+   "enemy_hero_near": 0.0
+  },
+  "hp=high|en=1|red=1|blue=2|d=0": {
+   "enemy_hero_near": 0.0,
+   "enemy_in_skill2_range": 0.0
+  },
+  "hp=low|en=0|red=2|blue=2|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=0|red=3|blue=3|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=1|red=1|blue=4|d=0": {
+   "enemy_in_skill2_range": 0.0,
+   "enemy_hero_near": 0.0
+  },
+  "hp=high|en=1|red=1|blue=4|d=0": {
+   "enemy_in_skill2_range": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=high|en=1|red=1|blue=3|d=0": {
+   "enemy_hero_near": 0.0
+  },
+  "hp=high|en=0|red=3|blue=2|d=0": {
+   "support_dps_lane_red": 0.0
+  },
+  "hp=high|en=0|red=2|blue=1|d=0": {
+   "support_dps_lane_red": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=high|en=0|red=1|blue=1|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=high|en=0|red=3|blue=1|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=1|red=1|blue=2|d=0": {
+   "engage_enemy": 0.0,
+   "enemy_in_skill2_range": 0.0
+  },
+  "hp=low|en=0|red=2|blue=1|d=0": {
+   "support_dps_lane": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=low|en=0|red=1|blue=1|d=0": {
+   "support_dps_lane_red": 0.0,
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=1|red=0|blue=1|d=0": {
+   "enemy_in_skill2_range": 0.0
+  },
+  "hp=ok|en=0|red=1|blue=4|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=ok|en=1|red=1|blue=3|d=0": {
+   "enemy_in_skill2_range": 0.0
+  },
+  "hp=ok|en=0|red=1|blue=3|d=0": {
+   "retreat_low_hp_map": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=ok|en=0|red=0|blue=4|d=0": {
+   "retreat_low_hp_map": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=ok|en=0|red=0|blue=3|d=0": {
+   "retreat_low_hp_map": 0.0,
+   "support_dps_lane": 0.0
+  },
+  "hp=ok|en=0|red=0|blue=2|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=ok|en=0|red=1|blue=2|d=0": {
+   "support_dps_lane": 0.0,
+   "dps_lane_push": 0.0
+  },
+  "hp=ok|en=0|red=1|blue=1|d=0": {
+   "dps_lane_push": 0.0,
+   "support_dps_lane": 0.0,
+   "support_dps_lane_red": 0.0
+  },
+  "hp=ok|en=0|red=2|blue=2|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=ok|en=0|red=2|blue=3|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=1|red=0|blue=2|d=0": {
+   "enemy_in_skill2_range": 0.0
+  },
+  "hp=high|en=2|red=1|blue=3|d=0": {
+   "enemy_hero_near": 0.0
+  },
+  "hp=low|en=0|red=3|blue=1|d=0": {
+   "support_dps_lane_red": 0.0
+  },
+  "hp=low|en=1|red=2|blue=1|d=0": {
+   "support_dps_lane": 0.0
+  },
+  "hp=low|en=1|red=2|blue=2|d=0": {
+   "enemy_in_skill2_range": 0.0
+  },
+  "hp=mid|en=1|red=2|blue=3|d=0": {
+   "engage_enemy": -1.5
+  },
+  "hp=low|en=2|red=2|blue=3|d=0": {
+   "enemy_hero_near": 0.0
+  }
+ },
+ "best_reason_by_state": {
+  "hp=low|en=0|red=0|blue=2|d=0": "support_dps_lane",
+  "hp=low|en=0|red=0|blue=1|d=0": "no_target",
+  "hp=low|en=0|red=0|blue=0|d=0": "no_target",
+  "hp=mid|en=0|red=0|blue=0|d=0": "retreat_low_hp_map",
+  "hp=high|en=0|red=0|blue=1|d=0": "dps_lane_push",
+  "hp=high|en=0|red=0|blue=0|d=0": "dps_lane_push",
+  "hp=high|en=0|red=0|blue=2|d=0": "dps_lane_push",
+  "hp=high|en=0|red=0|blue=3|d=0": "dps_lane_push",
+  "hp=low|en=0|red=0|blue=3|d=0": "dps_lane_push",
+  "hp=low|en=0|red=0|blue=4|d=0": "support_dps_lane",
+  "hp=high|en=1|red=0|blue=4|d=0": "enemy_in_skill2_range",
+  "hp=high|en=0|red=0|blue=4|d=0": "support_dps_lane",
+  "hp=low|en=0|red=1|blue=4|d=0": "hook_flight",
+  "hp=high|en=0|red=1|blue=4|d=0": "support_dps_lane",
+  "hp=low|en=0|red=1|blue=3|d=0": "dps_lane_push",
+  "hp=high|en=0|red=1|blue=3|d=0": "support_dps_lane",
+  "hp=high|en=0|red=1|blue=2|d=0": "dps_lane_push",
+  "hp=high|en=0|red=2|blue=4|d=0": "support_dps_lane",
+  "hp=low|en=0|red=2|blue=4|d=0": "support_dps_lane",
+  "hp=high|en=0|red=2|blue=2|d=0": "support_dps_lane",
+  "hp=high|en=0|red=2|blue=3|d=0": "support_dps_lane",
+  "hp=high|en=1|red=2|blue=3|d=0": "enemy_in_skill2_range",
+  "hp=low|en=0|red=2|blue=3|d=0": "support_dps_lane",
+  "hp=high|en=0|red=3|blue=4|d=0": "support_dps_lane",
+  "hp=high|en=0|red=3|blue=3|d=0": "support_dps_lane",
+  "hp=low|en=1|red=0|blue=3|d=0": "enemy_in_skill2_range",
+  "hp=low|en=1|red=0|blue=4|d=0": "enemy_in_skill2_range",
+  "hp=low|en=0|red=3|blue=2|d=0": "support_dps_lane_red",
+  "hp=low|en=0|red=3|blue=4|d=0": "support_dps_lane",
+  "hp=low|en=0|red=1|blue=2|d=0": "support_dps_lane",
+  "hp=low|en=1|red=1|blue=3|d=0": "enemy_in_skill2_range",
+  "hp=high|en=1|red=1|blue=2|d=0": "enemy_hero_near",
+  "hp=low|en=0|red=2|blue=2|d=0": "dps_lane_push",
+  "hp=low|en=0|red=3|blue=3|d=0": "support_dps_lane",
+  "hp=low|en=1|red=1|blue=4|d=0": "enemy_in_skill2_range",
+  "hp=high|en=1|red=1|blue=4|d=0": "enemy_in_skill2_range",
+  "hp=high|en=1|red=1|blue=3|d=0": "enemy_hero_near",
+  "hp=high|en=0|red=3|blue=2|d=0": "support_dps_lane_red",
+  "hp=high|en=0|red=2|blue=1|d=0": "support_dps_lane_red",
+  "hp=high|en=0|red=1|blue=1|d=0": "dps_lane_push",
+  "hp=high|en=0|red=3|blue=1|d=0": "support_dps_lane",
+  "hp=low|en=1|red=1|blue=2|d=0": "engage_enemy",
+  "hp=low|en=0|red=2|blue=1|d=0": "support_dps_lane",
+  "hp=low|en=0|red=1|blue=1|d=0": "support_dps_lane_red",
+  "hp=low|en=1|red=0|blue=1|d=0": "enemy_in_skill2_range",
+  "hp=ok|en=0|red=1|blue=4|d=0": "support_dps_lane",
+  "hp=ok|en=1|red=1|blue=3|d=0": "enemy_in_skill2_range",
+  "hp=ok|en=0|red=1|blue=3|d=0": "retreat_low_hp_map",
+  "hp=ok|en=0|red=0|blue=4|d=0": "retreat_low_hp_map",
+  "hp=ok|en=0|red=0|blue=3|d=0": "retreat_low_hp_map",
+  "hp=ok|en=0|red=0|blue=2|d=0": "support_dps_lane",
+  "hp=ok|en=0|red=1|blue=2|d=0": "support_dps_lane",
+  "hp=ok|en=0|red=1|blue=1|d=0": "dps_lane_push",
+  "hp=ok|en=0|red=2|blue=2|d=0": "support_dps_lane",
+  "hp=ok|en=0|red=2|blue=3|d=0": "support_dps_lane",
+  "hp=low|en=1|red=0|blue=2|d=0": "enemy_in_skill2_range",
+  "hp=high|en=2|red=1|blue=3|d=0": "enemy_hero_near",
+  "hp=low|en=0|red=3|blue=1|d=0": "support_dps_lane_red",
+  "hp=low|en=1|red=2|blue=1|d=0": "support_dps_lane",
+  "hp=low|en=1|red=2|blue=2|d=0": "enemy_in_skill2_range",
+  "hp=mid|en=1|red=2|blue=3|d=0": "engage_enemy",
+  "hp=low|en=2|red=2|blue=3|d=0": "enemy_hero_near"
+ }
+}
