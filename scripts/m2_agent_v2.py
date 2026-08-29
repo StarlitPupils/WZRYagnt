@@ -1177,10 +1177,17 @@ def main():
                 #   且金色名牌在名排区才判; 开局/结算/大厅的画面不误判
                 _sel_ok = False
                 try:
-                    _sel_roi = frame[10:40, 400:880]
+                    # v10.15 严格选人页判定: 顶部中央白字标题 + 无小地图血条UI(开局画面有)
+                    _sel_roi = frame[8:36, 380:900]
                     _hsv_sel = cv2.cvtColor(_sel_roi, cv2.COLOR_BGR2HSV)
                     _wsel = ((_hsv_sel[..., 1] < 70) & (_hsv_sel[..., 2] > 200)).sum()
-                    _sel_ok = _wsel > 40   # 顶部白色标题字(等待其他玩家选择)
+                    # 开局画面: 右上角有比分(白字 y0-30 x1100-1280) -> 排除
+                    _score_roi = frame[0:30, 1060:1280]
+                    _srv = float(_score_roi.max()) if _score_roi.size else 255.0
+                    # 且选人页没有小地图 (x<240 左上 无地图深色底)
+                    _mm_roi = frame[10:210, 10:230]
+                    _mm_mean = float(_mm_roi.mean()) if _mm_roi.size else 0.0
+                    _sel_ok = (_wsel > 40 and _srv < 240 and _mm_mean > 40)
                 except Exception:
                     _sel_ok = False
                 try:
