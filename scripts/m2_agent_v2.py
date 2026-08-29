@@ -1233,6 +1233,30 @@ def main():
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
                     _async_result_detect(frame, reward)
+                    try:
+                        import threading as _th2
+                        def _auto_learn():
+                            try:
+                                import subprocess as _sp2, sys as _sy2
+                                _r = _sp2.run([_sy2.executable, "-X", "utf8", "-u",
+                                               "scripts/evolve_policy.py"],
+                                              cwd=str(ROOT), capture_output=True, text=True, timeout=300)
+                                print(f"[自动学习] evolve: {_r.stdout.strip()[-100:]}")
+                            except Exception as _e:
+                                print(f"[自动学习] evolve err {_e}")
+                            try:
+                                _al = ROOT / "data" / "auto_labeled"
+                                if _al.exists() and len(list(_al.glob("*.png"))) >= 200:
+                                    import subprocess as _sp3, sys as _sy3
+                                    _r2 = _sp3.run([_sy3.executable, "-X", "utf8", "-u",
+                                                    "scripts/train_detector_v4.py", "--skip-merge"],
+                                                   cwd=str(ROOT), capture_output=True, text=True, timeout=1200)
+                                    print(f"[自动学习] retrain: {_r2.stdout.strip()[-100:]}")
+                            except Exception as _e2:
+                                print(f"[自动学习] train err {_e2}")
+                        _th2.Thread(target=_auto_learn, daemon=True).start()
+                    except Exception:
+                        pass
                 prev_phase = phase
                 confirm_streak = 0
                 confirmed = False
@@ -1266,6 +1290,14 @@ def main():
             if tracker is None:
                 tracker = make_tracker(frame)
             mm = tracker.update(frame)
+            # v11.4 一边打一边学: 采集地图内+外自标帧 (约2s)
+            try:
+                if now - float(cooldowns.get("auto_cap_t", 0.0)) >= 2.0:
+                    cooldowns["auto_cap_t"] = now
+                    from scripts.auto_capture import capture_once
+                    capture_once(frame, det)
+            except Exception:
+                pass
             # v5.0 模型小地图点融合: yolo v5 直接检测小地图上的 mm_red/mm_blue/mm_green
             #   -> 模型输出作为权威红/蓝/绿点 (mm_rules 硬规则退为兜底)
             try:
@@ -1587,6 +1619,23 @@ def main():
 
             # ---- 瑙勫垯鍐崇瓥 + v2.40 鏈浼樺喅绛栧櫒(鏋氫妇鍊欓>浠峰艰瘎浼>閫夋渶浼 <2ms) ----
             action = decide(state_dict, cooldowns)
+            # v11.4 操作-状态-得分记录 (selfplay)
+            try:
+                from wzry.learn.state_action_recorder import record as _sarec
+                _sarec(state_dict, cooldowns, action, reward.total, now)
+            except Exception:
+                pass
+            try:
+                from wzry.ui.osd import show as _osd2
+                _hp_pct = int(((state_dict.get("ui") or {}).get("hp") or 0) * 100)
+                _mp_pct = int(((state_dict.get("ui") or {}).get("mp") or 0) * 100)
+                _osd2(cooldowns.get("camp") or "?",
+                      ("支援下路(射手)" if cooldowns.get("camp") == "blue"
+                       else "支援上路(射手)" if cooldowns.get("camp") == "red" else "判定中"),
+                      f"HP{_hp_pct}% MP{_mp_pct}% [{str(action.get('type',''))}]",
+                      str(action.get("reason", ""))[:24])
+            except Exception:
+                pass
             try:
                 from wzry.ui.osd import show as _osd2
                 _osd2(cooldowns.get("camp") or "?",
@@ -1624,6 +1673,12 @@ def main():
                     cooldowns[f"evt_{_ev}_t"] = now
             if _ev:
                 sc = reward.on_event(_ev)
+                if sc:
+                    try:
+                        from wzry.learn.state_action_recorder import set_event as _setev
+                        _setev(_ev, sc, now)
+                    except Exception:
+                        pass
                 if sc:
                     print(f"[{datetime.now():%H:%M:%S}] [反馈] 事件 {_ev} "
                           f"{sc:+.0f} 分（总分 {reward.total:.0f}）")
