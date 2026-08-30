@@ -289,6 +289,21 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         if now - hook_pending > HOOK_CONFIRM_S:
             cooldowns["hook_pending"] = 0.0
 
+    # ---- v11.11 低血优先(用户: 残血先退安全→回城, 不打架!): 在技能块前 ----
+    _hp_low_first = float((state_dict.get("ui") or {}).get("hp") or 1.0)
+    _hp_low_first = _hp_low_first if 0 <= _hp_low_first <= 1 else 1.0
+    if (_hp_low_first < 0.30) and (now - float(cooldowns.get("recall_t", 0.0)) > 15.0):
+        _near_low = [s for s in (enemies + minions + monsters)
+                     if dist_width(s[0], s[1]) < 0.42]
+        if _near_low:
+            _esc_low = min(_near_low, key=lambda s: dist_width(s[0], s[1]))
+            _ax_low, _ay_low = _away_map(state_dict, _esc_low[0], _esc_low[1], k=0.22)
+            return {"type": "map_move", "nx": _ax_low, "ny": _ay_low,
+                    "reason": "low_hp_fallback_safe"}
+        # 安全: 回城(自动回泉水补满)
+        if ready("recall_t", 20.0):
+            cooldowns["recall_t"] = now
+            return {"type": "recall", "reason": "low_hp_recall_first"}
     # ---- brainless fire (skills if enemy present) ----
     # v10.11 血条修复: hp=None(检测失败)不默认满血 -> 用估计/保守值; 检测帧缺失也保守
     _hp_raw = (state_dict.get("ui") or {}).get("hp")
