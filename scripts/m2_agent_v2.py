@@ -1175,44 +1175,37 @@ def main():
             if phase != MatchPhase.IN_MATCH:
                 # v10.13 金名牌 ONLY 在真选人界面: 顶部中央有"等待其他玩家选择"白字
                 #   且金色名牌在名排区才判; 开局/结算/大厅的画面不误判
+                # v11.8 用户极简规则: 选人界面(未进游戏) 金色名字上=蓝/下=红
+                #   检测: 金色像素(名字高亮 V>180 S<120) 上半屏 vs 下半屏, 多者为名排
                 _sel_ok = False
                 try:
-                    # v10.15 严格选人页判定: 顶部中央白字标题 + 无小地图血条UI(开局画面有)
+                    # 选人页 = 顶部中央白字标题"等待…选择" + 无对局比分(右上无白字数字)
                     _sel_roi = frame[8:36, 380:900]
                     _hsv_sel = cv2.cvtColor(_sel_roi, cv2.COLOR_BGR2HSV)
-                    _wsel = ((_hsv_sel[..., 1] < 70) & (_hsv_sel[..., 2] > 200)).sum()
-                    # 开局画面: 右上角有比分(白字 y0-30 x1100-1280) -> 排除
+                    _wsel = ((_hsv_sel[..., 1] < 80) & (_hsv_sel[..., 2] > 185)).sum()
                     _score_roi = frame[0:30, 1060:1280]
                     _srv = float(_score_roi.max()) if _score_roi.size else 255.0
-                    # 且选人页没有小地图 (x<240 左上 无地图深色底)
-                    _mm_roi = frame[10:210, 10:230]
-                    _mm_mean = float(_mm_roi.mean()) if _mm_roi.size else 0.0
-                    _sel_ok = (_wsel > 40 and _srv < 240 and _mm_mean > 40)
+                    _sel_ok = (_wsel > 40 and _srv < 240)
                 except Exception:
                     _sel_ok = False
-                try:
-                    _hsvG = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                    _HG = _hsvG[..., 0].astype(int)
-                    _SG = _hsvG[..., 1].astype(int)
-                    _VG = _hsvG[..., 2].astype(int)
-                    _goldm = (_HG >= 12) & (_HG <= 42) & (_SG > 110) & (_VG > 140)
-                    _gold_cnt = int(_goldm[:, 360:880].sum())
-                    if _gold_cnt > 120:
-                        _gold_y = np.nonzero(_goldm[:, 360:880])[0]
-                        _cnt_up = int(((_gold_y >= 40) & (_gold_y < 300)).sum())
-                        _cnt_lo = int(((_gold_y >= 400) & (_gold_y < 680)).sum())
-                        if _cnt_up >= 80 and _cnt_up >= _cnt_lo * 2:
-                            _row_lock = "blue"   # 金色上排=蓝方 (用户原规则)
-                        elif _cnt_lo >= 80 and _cnt_lo >= _cnt_up * 2:
-                            _row_lock = "red"    # 金色下排=红方 (本局下排=红 ✓)
-                        else:
-                            _row_lock = None
-                    else:
+                _row_lock = None
+                if _sel_ok:
+                    try:
+                        _hsvG = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                        _HG = _hsvG[..., 0].astype(int)
+                        _SG = _hsvG[..., 1].astype(int)
+                        _VG = _hsvG[..., 2].astype(int)
+                        # 金色名字: 亮金色文字 (H12-42, V>170), 全画面上下半屏统计
+                        _goldm = (_HG >= 12) & (_HG <= 42) & (_VG > 170)
+                        _gold_y = np.nonzero(_goldm)[0]
+                        _cnt_up = int(((_gold_y >= 30) & (_gold_y < 350)).sum())
+                        _cnt_lo = int(((_gold_y >= 350) & (_gold_y < 700)).sum())
+                        if _cnt_up > 60 and _cnt_up > _cnt_lo:
+                            _row_lock = "blue"   # 金色在上半屏 = 名字上排 = 蓝方
+                        elif _cnt_lo > 60 and _cnt_lo > _cnt_up:
+                            _row_lock = "red"    # 金色在下半屏 = 名字下排 = 红方
+                    except Exception:
                         _row_lock = None
-                except Exception:
-                    _row_lock = None
-                if _row_lock and not _sel_ok:
-                    _row_lock = None   # 非选人界面 -> 金名牌无效
                 if _row_lock:
                     _prev_g = cooldowns.get("gold_row_prev")
                     _g_streak = int(cooldowns.get("gold_row_streak", 0))
