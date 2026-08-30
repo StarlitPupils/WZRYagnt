@@ -433,7 +433,10 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
             cooldowns["recall_t"] = now
             return {"type": "recall", "reason": "low_hp_safe_recall"}
         # 涓嶅湪濉斾笅 -> 鏈嚜瀹跺璧帮紙鏃犲鍙鍒欐湞娉夋按> 忓湴鍥剧偣鍑 鑷娉夌偣
-        return {"type": "map_move", "nx": fx, "ny": fy, "reason": "retreat_low_hp_map"}
+        # 残血安全: 回城(自动回泉水), 满血再出
+        if ready("recall_t", RECALL_THROTTLE_S):
+            cooldowns["recall_t"] = now
+            return {"type": "recall", "reason": "low_hp_safe_recall"}
 
     # ---- 0.6) 鎭閿紙鐢埛瑙勫垯夛細HP 鎴MP < 80% 涓旇韩杈瑰畨鍏鈫鎸夋仮澶嶉敭 ----
     ui = state_dict.get("ui") or {}
