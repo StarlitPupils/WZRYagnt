@@ -407,13 +407,15 @@ def decide(state_dict: dict, cooldowns: dict) -> dict:
         _near_pool = [s for s in (enemies + minions + monsters)
                       if dist_width(s[0], s[1]) < 0.45]
         if _near_pool:
-            # 敌近: 远离最近威胁 + 向泉水方向撤
+            # 残血 + 敌近: 先退到安全位置(远离敌人, 向后退) - 不是回泉水!
             _esc = min(_near_pool, key=lambda s: dist_width(s[0], s[1]))
-            _ax_hp, _ay_hp = _away_map(state_dict, _esc[0], _esc[1], k=0.20)
+            _ax_hp, _ay_hp = _away_map(state_dict, _esc[0], _esc[1], k=0.22)
             return {"type": "map_move", "nx": _ax_hp, "ny": _ay_hp,
-                    "reason": "retreat_low_hp_map"}
+                    "reason": "low_hp_fallback_safe"}
+        # 残血 + 安全: 回城(自动回泉水), 满血后回来
         if ready("recall_t", 20.0):
             cooldowns["recall_t"] = now
+            cooldowns["low_hp_recall_t"] = now   # 标记(回城后满血再出)
             return {"type": "recall", "reason": "low_hp_safe_recall_15"}
 
     # ---- 0.5) 浣庤閲忔挙閫堢敤鎴疯鍒欙級欻P<20% 鍥炶嚜瀹跺涓嬪啀鍥炲煄 ----
