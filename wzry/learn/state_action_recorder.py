@@ -86,6 +86,7 @@ def record(state_dict, cooldowns, action, reward_total, now=None):
         }
         with _lock:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            fh.flush()   # 即时落盘 (防文件0KB/缓冲)
             _cnt += 1
     except Exception:
         pass
