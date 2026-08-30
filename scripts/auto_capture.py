@@ -34,14 +34,10 @@ CLS = {"mm_red": 12, "mm_blue": 13, "mm_green": 14,
 
 
 def _vote(store, key, cls, conf):
-    """多帧投票: 返回 True(入库) 当连续2次同 key+cls。"""
+    """v11.6 单帧即入库(高置信自标); 同 key 重复也 True。"""
     with _lock:
-        if store.get(key) == cls:
-            store[key] = cls   # 延续
-            return True
-        else:
-            store[key] = cls
-            return False
+        store[key] = cls
+        return True
 
 
 def capture_once(frame, det, cls_model=None):
