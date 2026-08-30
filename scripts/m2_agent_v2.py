@@ -1072,6 +1072,39 @@ def main():
     print(f"鍔犺浇妫娴嬫鍨{args.model} ...")
     det = YoloDetector(args.model, conf=0.35)
 
+    # v11.9 自动学习守护: 每120s检查 selfplay 新数据 -> 变化则 evolve_policy (防POST_MATCH漏触)
+    try:
+        import threading as _thg
+        import subprocess as _spg
+        import sys as _syg
+        def _auto_learn_watch():
+            _last_learn = 0.0
+            _last_sp_mtime = 0.0
+            while True:
+                try:
+                    import time as _tg
+                    _spr = ROOT / "data" / "selfplay"
+                    if _spr.exists():
+                        _fs = sorted(_spr.glob("*.jsonl"), key=lambda f: f.stat().st_mtime)
+                        if _fs:
+                            _mt = _fs[-1].stat().st_mtime
+                            _now = _tg.time()
+                            if _mt > _last_sp_mtime and _now - _last_learn > 300.0:
+                                _last_learn = _now
+                                _r = _spg.run([_syg.executable, "-X", "utf8", "-u",
+                                               "scripts/evolve_policy.py"],
+                                              cwd=str(ROOT), capture_output=True, text=True, timeout=300)
+                                print(f"[自动学习守护] evolve: {_r.stdout.strip()[-100:]}")
+                            _last_sp_mtime = _mt
+                    _tg.sleep(120)
+                except Exception as _e3:
+                    print(f"[自动学习守护] err {_e3}")
+                    import time as _tg2
+                    _tg2.sleep(120)
+        _thg.Thread(target=_auto_learn_watch, daemon=True).start()
+    except Exception as _e4:
+        print(f"[自动学习守护] init err {_e4}")
+
     # 忓湴鍥捐窡韪細鍏堥獙 = 鏍噯鐐癸紙褰掍竴鍖-> 棣栦釜瀹為檯甯昂瀵告崲绠楋級
     mm_prior = None
 
