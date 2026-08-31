@@ -43,6 +43,8 @@ class _Track:
 class MMTrackerV7:
     def __init__(self):
         self.det = MMDetectorV7()
+        self._mm_cache_f = None   # v13.6 mm检测缓存
+        self._mm_cache_t = 0.0
         self._last_mm = None   # v2.90 最近小地图裁剪(输出点重闸用)
         self._last_self = None # v3.3 上帧自己位置(缓慢移动闸)
         self.tracks = {"self": {}, "ally": {}, "enemy": {}}
@@ -201,7 +203,13 @@ class MMTrackerV7:
     # ---------- 主入口 ----------
     def update(self, frame):
         t0 = time.perf_counter()
-        r = self.det.detect(frame)
+        # v13.6 mm.detect 200ms缓存(小地图点200ms内不变, 省137ms/帧, 功能不变)
+        _nwc = time.perf_counter()
+        r = self._mm_cache_f if (self._mm_cache_f is not None and _nwc - self._mm_cache_t < 0.2) else None
+        if r is None:
+            r = self.det.detect(frame)
+            self._mm_cache_f = r
+            self._mm_cache_t = _nwc
         # v2.90 输出点重闸: 留存小地图裁剪 (0..msz 方区, 与 det 同坐标系)
         r0 = r.get("size", 232) or 232
         self._last_mm = (frame[0:int(r0), 0:int(r0)]

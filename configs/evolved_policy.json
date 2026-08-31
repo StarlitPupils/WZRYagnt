@@ -1,6 +1,6 @@
 {
  "version": "v11",
- "n": 68207,
+ "n": 68230,
  "buckets": {
   "hp=high|en=1|red=1|blue=1|d=0": {
    "enemy_in_skill2_range": 0.362,
