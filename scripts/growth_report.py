@@ -70,7 +70,9 @@ def analyze(session_path):
             "events": {EVT_CN.get(k, k): v for k, v in events.items()},
             "by_reason": by_reason, "reason_avg": reason_avg,
             "hp_min": round(hp_min, 2), "hp_avg": hp_avg,
-            "engage_ratio": round(engage_cnt / max(1, len(recs)), 2)}
+            "engage_ratio": round(engage_cnt / max(1, len(recs)), 2),
+            "dmg_est": (kill + assist) * 12 + by_reason.get("一技能消耗", 0) * 2,
+            "taken_est": events.get("被攻击", 0) * 6 + died * 15}
 
 
 def abilities(rep):
@@ -98,6 +100,7 @@ def generate_html(reps):
         kda = f"{rp['kill']}/{rp['died']}/{rp['assist']}"
         avg_str = "、".join(f"{r}({v:+.0f})" for r, v in sorted(rp["reason_avg"].items(), key=lambda kv: -kv[1])[:4]) or "暂无"
         rows += f"""<tr data-{i}><td>{rp['session']}</td><td>{kda}</td><td>{rp['total']}</td>
+        <td>{rp['dmg_est']}</td><td>{rp['taken_est']}</td>
         <td>{'、'.join(f'{k}:{v}' for k,v in rp['events'].items()) or '无'}</td>
         <td>{rp['hp_min']}</td><td>{avg_str}</td></tr>"""
         # 雷达数据 canvas
@@ -129,7 +132,7 @@ canvas{{background:#161b22;border-radius:8px}}
 <h1>🎮 AI 王者荣耀 学习成长报告</h1>
 <p style="text-align:center;color:#8b949e">每把自动更新 | {__import__('datetime').datetime.now():%Y-%m-%d %H:%M}</p>
 <h2>📊 各局 KDA / 得分 / 事件</h2>
-<table><tr><th>对局</th><th>KDA(杀/死/助)</th><th>总分</th><th>事件</th><th>最低血</th><th>高分操作</th></tr>{rows}</table>
+<table><tr><th>对局</th><th>KDA(杀/死/助)</th><th>总分</th><th>估算伤害</th><th>估算承伤</th><th>事件</th><th>最低血</th><th>高分操作</th></tr>{rows}</table>
 <h2>📈 能力雷达图 (每局: 攻击/生存/支援/推进/安全)</h2>
 <div class="radar-grid">{canvases}</div>
 <h2>📉 对比平均 (最近局 vs 前几局平均)</h2>
