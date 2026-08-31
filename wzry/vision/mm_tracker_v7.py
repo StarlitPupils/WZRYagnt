@@ -205,7 +205,7 @@ class MMTrackerV7:
         t0 = time.perf_counter()
         # v13.6 mm.detect 200ms缓存(小地图点200ms内不变, 省137ms/帧, 功能不变)
         _nwc = time.perf_counter()
-        r = self._mm_cache_f if (self._mm_cache_f is not None and _nwc - self._mm_cache_t < 0.2) else None
+        r = self._mm_cache_f if (self._mm_cache_f is not None and _nwc - self._mm_cache_t < 0.4) else None
         if r is None:
             r = self.det.detect(frame)
             self._mm_cache_f = r
