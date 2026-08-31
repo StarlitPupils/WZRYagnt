@@ -31,7 +31,7 @@ def detect_show_stage(frame):
         # 特征3: 无小地图(左上角简洁=非对局), 无比分HUD (右上无白字比分)
         mm_roi = frame[10:210, 10:230]
         mm_mean = float(mm_roi.mean()) if mm_roi.size else 0.0
-        return vs_white > 100 and up_std > 25 and lo_std > 25 and mm_mean < 60
+        return vs_white > 20 and up_std > 30 and lo_std > 30 and mm_mean < 60
     except Exception:
         return False
 
@@ -50,9 +50,12 @@ def gold_name_row(frame):
             return None
         up = int((ys < 360).sum())
         lo = int((ys >= 360).sum())
-        if up > lo * 2 and up >= 25:
+        # v12.7 名字金色: 在哪排卡片区域(上排卡片 y40-280 / 下排 y440-660), 取卡区内金色多者
+        _up_card = int((((ys >= 40) & (ys < 280))).sum())
+        _lo_card = int((((ys >= 440) & (ys < 660))).sum())
+        if _up_card > 30 and _up_card > _lo_card * 1.5:
             return "up"
-        if lo > up * 2 and lo >= 25:
+        if _lo_card > 30 and _lo_card > _up_card * 1.5:
             return "down"
         return None
     except Exception:

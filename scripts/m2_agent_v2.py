@@ -1241,24 +1241,15 @@ def main():
                     _sel_ok = (_wsel > 40 and _srv < 240)
                 except Exception:
                     _sel_ok = False
+                # v12.7 阵营根治: 仅"选完英雄展示阶段"(上下排英雄卡+VS) 判金色名字上下
                 _row_lock = None
-                if _sel_ok:
-                    try:
-                        _hsvG = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-                        _HG = _hsvG[..., 0].astype(int)
-                        _SG = _hsvG[..., 1].astype(int)
-                        _VG = _hsvG[..., 2].astype(int)
-                        # 金色名字: 亮金色文字 (H12-42, V>170), 全画面上下半屏统计
-                        _goldm = (_HG >= 12) & (_HG <= 42) & (_VG > 170)
-                        _gold_y = np.nonzero(_goldm)[0]
-                        _cnt_up = int(((_gold_y >= 30) & (_gold_y < 350)).sum())
-                        _cnt_lo = int(((_gold_y >= 350) & (_gold_y < 700)).sum())
-                        if _cnt_up > 60 and _cnt_up > _cnt_lo:
-                            _row_lock = "blue"   # 金色在上半屏 = 名字上排 = 蓝方
-                        elif _cnt_lo > 60 and _cnt_lo > _cnt_up:
-                            _row_lock = "red"    # 金色在下半屏 = 名字下排 = 红方
-                    except Exception:
-                        _row_lock = None
+                try:
+                    from wzry.vision.camp_detect import detect_show_stage, gold_name_row
+                    if detect_show_stage(frame):
+                        _row2 = gold_name_row(frame)
+                        _row_lock = "blue" if _row2 == "up" else ("red" if _row2 == "down" else None)
+                except Exception:
+                    _row_lock = None
                 if _row_lock:
                     _prev_g = cooldowns.get("gold_row_prev")
                     _g_streak = int(cooldowns.get("gold_row_streak", 0))
@@ -1268,14 +1259,15 @@ def main():
                         _g_streak = 1
                     cooldowns["gold_row_prev"] = _row_lock
                     cooldowns["gold_row_streak"] = _g_streak
-                    if _g_streak >= 3 and not cooldowns.get("camp"):
+                    if _g_streak >= 2 and not cooldowns.get("camp"):
                         cooldowns["camp"] = _row_lock
                         cooldowns.pop("camp_votes", None)
-                        print(f"[{datetime.now():%H:%M:%S}] 阵营判断(金名牌3帧): "
+                        print(f"[{datetime.now():%H:%M:%S}] 阵营判断(展示阶段金名牌): "
                               f"{'蓝方' if _row_lock == 'blue' else '红方'} → "
-                              f"发育路方向 {LANE_DIR_BLUE if _row_lock == 'blue' else LANE_DIR_RED}")
+                              f"支援{'下路(射手)' if _row_lock == 'blue' else '上路(射手)'}")
                 else:
                     cooldowns["gold_row_streak"] = 0
+                # (旧金色检测已移除)
                 # post match detect
                 if prev_phase == MatchPhase.IN_MATCH and phase == MatchPhase.POST_MATCH:
                     _async_result_detect(frame, reward)
