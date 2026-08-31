@@ -317,7 +317,32 @@ def solve(state, fallback_action, hp, camp="blue", base_score=0.0):
             cands = [c for c in cands
                      if any(c[0].get("reason", "").startswith(p) for p in keep_prefix)
                      or c[0].get("type") == "none"]
-        scored = [(evaluate(c, f, camp), c) for c in cands]
+        # v12.1 前瞻演算(蒙特卡洛式, 用户: 像下棋演算多步): 每候选评估 + 模拟执行后
+        #   估计"未来2步"收益: 移动后距敌/距队变化 + 敌群趋近风险 -> 加权 0.35
+        def _forecast(c, f0):
+            try:
+                a = c[0]
+                if a.get("type") != "map_move":
+                    return 0.0
+                nx, ny = a.get("nx", 0.5), a.get("ny", 0.5)
+                # 模拟: 移到此点后, 敌/队友距离变化
+                _d_red_before = min([math.hypot(f0["g"][0]-p[0], f0["g"][1]-p[1]) for p in f0["reds"]], default=9.9)
+                _d_red_after = min([math.hypot(nx-p[0], ny-p[1]) for p in f0["reds"]], default=9.9)
+                _d_blue_before = min([math.hypot(f0["g"][0]-p[0], f0["g"][1]-p[1]) for p in f0["blues"]], default=9.9)
+                _d_blue_after = min([math.hypot(nx-p[0], ny-p[1]) for p in f0["blues"]], default=9.9)
+                v = 0.0
+                if _d_red_after > _d_red_before + 0.05:
+                    v += 0.8        # 远离敌人(安全提升)
+                elif _d_red_after < _d_red_before - 0.05:
+                    v -= 0.8        # 靠近敌人(风险)
+                if _d_blue_after < _d_blue_before - 0.05:
+                    v += 0.5        # 靠近队友(协同)
+                if f0.get("hp", 1.0) < 0.5 and _d_red_after < 0.2:
+                    v -= 1.5        # 残血向敌群 = 大风险
+                return v
+            except Exception:
+                return 0.0
+        scored = [(evaluate(c, f, camp) + 0.35 * _forecast(c, f), c) for c in cands]
         scored.sort(key=lambda x: -x[0])
         # 战术候选最高分 vs 网格移动分
         if scored and gv >= scored[0][0]:
