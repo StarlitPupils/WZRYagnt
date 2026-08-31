@@ -97,9 +97,17 @@ class YoloDetector:
 
     def detect(self, frame: np.ndarray) -> List[Det]:
         t0 = time.perf_counter()
-        results = self.model.predict(frame, conf=self.conf, iou=self.iou,
-                                     device=self.device, verbose=False,
-                                     half=self.half)[0]
+        # v13.2 inference_mode: 减推理内存(不影响结果)
+        try:
+            import torch as _t
+            with _t.inference_mode():
+                results = self.model.predict(frame, conf=self.conf, iou=self.iou,
+                                             device=self.device, verbose=False,
+                                             half=self.half)[0]
+        except Exception:
+            results = self.model.predict(frame, conf=self.conf, iou=self.iou,
+                                         device=self.device, verbose=False,
+                                         half=self.half)[0]
         self.last_infer_ms = (time.perf_counter() - t0) * 1000.0
         dets: List[Det] = []
         if results.boxes is None:
