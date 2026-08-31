@@ -1109,14 +1109,20 @@ def main():
                         if _fs:
                             _mt = _fs[-1].stat().st_mtime
                             _now = _tg.time()
-                            if _mt > _last_sp_mtime and _now - _last_learn > 300.0:
-                                _last_learn = _now
-                                _r = _spg.run([_syg.executable, "-X", "utf8", "-u",
-                                               "scripts/evolve_policy.py"],
-                                              cwd=str(ROOT), capture_output=True, text=True, timeout=300)
-                                print(f"[自动学习守护] evolve: {_r.stdout.strip()[-100:]}")
+                            if _mt > _last_sp_mtime:
+                                if _now - _last_learn > 300.0:
+                                    _last_learn = _now
+                                    _r = _spg.run([_syg.executable, "-X", "utf8", "-u",
+                                                   "scripts/evolve_policy.py"],
+                                                  cwd=str(ROOT), capture_output=True, text=True, timeout=300)
+                                    print(f"[自动学习守护] evolve: {_r.stdout.strip()[-100:]}")
+                                # v12.8 每次新数据都生成中文学习网页 (实时更新)
+                                _rg = _spg.run([_syg.executable, "-X", "utf8", "-u",
+                                                "scripts/growth_report.py"],
+                                               cwd=str(ROOT), capture_output=True, text=True, timeout=120)
+                                print(f"[自动学习守护] 网页: {_rg.stdout.strip()[-50:]}")
                             _last_sp_mtime = _mt
-                    _tg.sleep(120)
+                    _tg.sleep(60)
                 except Exception as _e3:
                     print(f"[自动学习守护] err {_e3}")
                     import time as _tg2
