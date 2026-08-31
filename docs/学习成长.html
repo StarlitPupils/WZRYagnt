@@ -1,52 +1,84 @@
 <!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
-<title>AI 学习成长报告 (中文)</title>
+<title>AI 王者荣耀 学习成长报告</title>
 <style>body{font-family:'微软雅黑';margin:20px;background:#0d1117;color:#e6edf3}
 h1{color:#58a6ff;text-align:center}h2{color:#f0883e;border-bottom:2px solid #30363d;padding:8px}
 table{border-collapse:collapse;width:100%;margin:10px 0}th,td{border:1px solid #30363d;padding:8px;font-size:13px}
 th{background:#161b22}tr:nth-child(even){background:#161b22}
 .report{background:#161b22;border-radius:8px;padding:15px;margin:10px 0}
 .stat{font-size:15px;margin:5px}
-.bar{background:#238636;color:white;padding:3px 8px;border-radius:4px;display:inline-block;margin:2px}
-.up{color:#3fb950}.down{color:#f85149}</style></head>
+.radar-grid{display:flex;flex-wrap:wrap;gap:10px}
+canvas{background:#161b22;border-radius:8px}
+.diff-up{color:#3fb950}.diff-down{color:#f85149}</style></head>
 <body>
 <h1>🎮 AI 王者荣耀 学习成长报告</h1>
-<p style="text-align:center;color:#8b949e">每把自我学习后自动更新 | 2026-08-31 16:16</p>
-<h2>📊 最近一局学习详情</h2><div class="report">
-<p class="stat"><b>20260831_144437</b> | 记录 5159 步 | 总分 <b>-405.0</b></p>
-<p class="stat">🎯 本局事件: 死亡:11、推塔:6、被攻击:6、回城被打断:2、清兵:14、助攻:5、钩中:2</p>
-<p class="stat">📉 最低血量: 0.22 | 💀 死亡计数: 0</p>
-<p class="stat">✅ 学到的高分操作: enemy_hero_near(+0.64)、engage_enemy(+0.27)、chase_enemy(+0.14)、support_dps_lane_red(+0.01)、no_target(+0.00)</p>
-<p class="stat">❌ 负分操作(应避免): 二技能出钩(勾敌人)(-0.88)、支援射手路(-0.12)、hook_flight(-0.03)</p>
-</div><h2>📈 各局学习数据 (叠加历史)</h2>
-<table><tr><th>对局</th><th>记录步数</th><th>总分</th><th>事件</th><th>死亡</th><th>最低血</th><th>学到的高分操作</th></tr><tr><td>20260829_140756</td><td>1</td>
-        <td>20.0</td><td>击杀:1</td><td>0</td>
-        <td>0.8</td><td>暂无</td></tr><tr><td>20260829_211340</td><td>5172</td>
-        <td>-134.0</td><td>清兵:3、被攻击:5、助攻:3、死亡:4、钩中:3</td><td>0</td>
-        <td>0.22</td><td>enemy_hero_near +0.19分; hook_flight +0.17分; 射手路推进 +0.02分; no_target +0.00分; retreat_low_hp_map +0.00分; </td></tr><tr><td>20260830_142423</td><td>3072</td>
-        <td>-178.0</td><td>死亡:4、钩中:3、被攻击:4、清兵:2、推塔:1、回城被打断:1</td><td>0</td>
-        <td>0.22</td><td>engage_enemy +0.48分; chase_enemy +0.29分; hook_flight +0.02分; no_target +0.00分; 射手路推进 +0.00分; </td></tr><tr><td>20260830_145230</td><td>2507</td>
-        <td>-21.0</td><td>被攻击:2、死亡:1、推塔:1、助攻:1、钩中:1</td><td>0</td>
-        <td>0.24</td><td>支援射手路 +0.02分; no_target +0.00分; 二技能出钩(勾敌人) +0.00分; engage_enemy +0.00分; chase_enemy +0.00分; </td></tr><tr><td>20260830_150449</td><td>1912</td>
-        <td>-29.0</td><td>被攻击:3、助攻:2、死亡:1</td><td>0</td>
-        <td>0.26</td><td>支援射手路 +0.02分; no_target +0.00分; 射手路推进 +0.00分; retreat_low_hp_map +0.00分; 二技能出钩(勾敌人) +0.00分; </td></tr><tr><td>20260830_152055</td><td>2722</td>
-        <td>-83.0</td><td>被攻击:4、助攻:3、死亡:3、击杀:1、清兵:2、推塔:1</td><td>0</td>
-        <td>0.22</td><td>enemy_hero_near +0.74分; engage_enemy +0.69分; no_target +0.00分; hook_flight +0.00分; 低资源恢复 +0.00分; </td></tr><tr><td>20260830_161622</td><td>9045</td>
-        <td>-696.0</td><td>死亡:17、钩中:6、清兵:11、被攻击:16、助攻:4、推塔:8、be_tower_attacked:1</td><td>0</td>
-        <td>0.22</td><td>hp_drop_escape +1.00分; engage_enemy +0.15分; 低资源恢复 +0.09分; support_dps_lane_red +0.06分; hook_flight +0.06分; </td></tr><tr><td>20260830_213758</td><td>533</td>
-        <td>-107.0</td><td>被攻击:3、清兵:1、死亡:2</td><td>0</td>
-        <td>0.27</td><td>低资源恢复 +0.00分; no_target +0.00分; 射手路推进 +0.00分; support_dps_lane_red +0.00分; enemy_hero_near +0.00分; </td></tr><tr><td>20260830_214233</td><td>304</td>
-        <td>-108.0</td><td>死亡:2、be_tower_attacked:1、推塔:1、清兵:1</td><td>0</td>
-        <td>0.29</td><td>no_target +0.00分; 射手路推进 +0.00分; 支援射手路 -0.17分; 二技能出钩(勾敌人) -7.14分; </td></tr><tr><td>20260830_214602</td><td>12122</td>
-        <td>-787.0</td><td>清兵:14、助攻:2、推塔:4、钩中:13、被攻击:5、死亡:20</td><td>0</td>
-        <td>0.22</td><td>chase_enemy +0.19分; no_target +0.14分; 低资源恢复 +0.00分; hp_drop_escape +0.00分; recall_in_progress +0.00分; </td></tr><tr><td>20260831_144437</td><td>5159</td>
-        <td>-405.0</td><td>死亡:11、推塔:6、被攻击:6、回城被打断:2、清兵:14、助攻:5、钩中:2</td><td>0</td>
-        <td>0.22</td><td>enemy_hero_near +0.64分; engage_enemy +0.27分; chase_enemy +0.14分; support_dps_lane_red +0.01分; no_target +0.00分; </td></tr></table>
-<h2>🧠 本系统不断学到的东西</h2>
-<div class="report">
-<p>• <b>碰到敌人 → 二技能先出钩</b> (勾中再放大招, 没勾到只一技能消耗)</p>
-<p>• <b>残血 → 先退到安全位置, 再回城补满</b> (不再硬拼)</p>
-<p>• <b>支援 → 去射手路</b> (蓝方下路/红方上路, 射手在哪跟哪)</p>
-<p>• <b>不追小地图红点</b> (假信号不可信, 只认屏幕上的真敌人)</p>
-</div>
-<p style="color:#8b949e">完整数据: data/selfplay/*.jsonl | 进化策略: configs/evolved_policy.json</p>
+<p style="text-align:center;color:#8b949e">每把自动更新 | 2026-08-31 18:41</p>
+<h2>📊 各局 KDA / 得分 / 事件</h2>
+<table><tr><th>对局</th><th>KDA(杀/死/助)</th><th>总分</th><th>事件</th><th>最低血</th><th>高分操作</th></tr><tr data-0><td>20260829_140756</td><td>1/0/0</td><td>20.0</td>
+        <td>击杀:1</td>
+        <td>0.8</td><td>暂无</td></tr><tr data-1><td>20260829_211340</td><td>0/4/3</td><td>-134.0</td>
+        <td>清兵:3、被攻击:5、助攻:3、死亡:4、钩中:3</td>
+        <td>0.22</td><td>一技能消耗(+0)、钩子飞行(+0)、射手路推进(+0)、no_target(+0)</td></tr><tr data-2><td>20260830_142423</td><td>0/4/0</td><td>-178.0</td>
+        <td>死亡:4、钩中:3、被攻击:4、清兵:2、推塔:1、回城被打断:1</td>
+        <td>0.22</td><td>攻击敌人(+0)、chase_enemy(+0)、钩子飞行(+0)、no_target(+0)</td></tr><tr data-3><td>20260830_145230</td><td>0/1/1</td><td>-21.0</td>
+        <td>被攻击:2、死亡:1、推塔:1、助攻:1、钩中:1</td>
+        <td>0.24</td><td>支援射手路(+0)、no_target(+0)、二技能出钩(+0)、攻击敌人(+0)</td></tr><tr data-4><td>20260830_150449</td><td>0/1/2</td><td>-29.0</td>
+        <td>被攻击:3、助攻:2、死亡:1</td>
+        <td>0.26</td><td>支援射手路(+0)、no_target(+0)、射手路推进(+0)、retreat_low_hp_map(+0)</td></tr><tr data-5><td>20260830_152055</td><td>1/3/3</td><td>-83.0</td>
+        <td>被攻击:4、助攻:3、死亡:3、击杀:1、清兵:2、推塔:1</td>
+        <td>0.22</td><td>一技能消耗(+1)、攻击敌人(+1)、no_target(+0)、钩子飞行(+0)</td></tr><tr data-6><td>20260830_161622</td><td>0/17/4</td><td>-696.0</td>
+        <td>死亡:17、钩中:6、清兵:11、被攻击:16、助攻:4、推塔:8、be_tower_attacked:1</td>
+        <td>0.22</td><td>hp_drop_escape(+1)、攻击敌人(+0)、低资源恢复(+0)、support_dps_lane_red(+0)</td></tr><tr data-7><td>20260830_213758</td><td>0/2/0</td><td>-107.0</td>
+        <td>被攻击:3、清兵:1、死亡:2</td>
+        <td>0.27</td><td>低资源恢复(+0)、no_target(+0)、射手路推进(+0)、support_dps_lane_red(+0)</td></tr><tr data-8><td>20260830_214233</td><td>0/2/0</td><td>-108.0</td>
+        <td>死亡:2、be_tower_attacked:1、推塔:1、清兵:1</td>
+        <td>0.29</td><td>no_target(+0)、射手路推进(+0)、支援射手路(-0)、二技能出钩(-7)</td></tr><tr data-9><td>20260830_214602</td><td>0/20/2</td><td>-787.0</td>
+        <td>清兵:14、助攻:2、推塔:4、钩中:13、被攻击:5、死亡:20</td>
+        <td>0.22</td><td>chase_enemy(+0)、no_target(+0)、低资源恢复(+0)、hp_drop_escape(+0)</td></tr><tr data-10><td>20260831_144437</td><td>0/11/5</td><td>-405.0</td>
+        <td>死亡:11、推塔:6、被攻击:6、回城被打断:2、清兵:14、助攻:5、钩中:2</td>
+        <td>0.22</td><td>一技能消耗(+1)、攻击敌人(+0)、chase_enemy(+0)、support_dps_lane_red(+0)</td></tr><tr data-11><td>20260831_162427</td><td>0/37/8</td><td>-1650.0</td>
+        <td>死亡:37、清兵:23、推塔:6、钩中:4、被攻击:12、hook_kill:1、助攻:8、回城被打断:6</td>
+        <td>0.22</td><td>chase_enemy(+1)、残血回城(+1)、钩子飞行(+0)、hook_confirmed_combo(+0)</td></tr></table>
+<h2>📈 能力雷达图 (每局: 攻击/生存/支援/推进/安全)</h2>
+<div class="radar-grid"><canvas id="radar0" width="220" height="220"></canvas><canvas id="radar1" width="220" height="220"></canvas><canvas id="radar2" width="220" height="220"></canvas><canvas id="radar3" width="220" height="220"></canvas><canvas id="radar4" width="220" height="220"></canvas><canvas id="radar5" width="220" height="220"></canvas><canvas id="radar6" width="220" height="220"></canvas><canvas id="radar7" width="220" height="220"></canvas><canvas id="radar8" width="220" height="220"></canvas><canvas id="radar9" width="220" height="220"></canvas><canvas id="radar10" width="220" height="220"></canvas><canvas id="radar11" width="220" height="220"></canvas></div>
+<h2>📉 对比平均 (最近局 vs 前几局平均)</h2>
+<div class="report" id="compare"></div>
+<script>
+const reps = [{"session": "20260829_140756", "kill": 1, "assist": 0, "died": 0, "total": 20.0}, {"session": "20260829_211340", "kill": 0, "assist": 3, "died": 4, "total": -134.0}, {"session": "20260830_142423", "kill": 0, "assist": 0, "died": 4, "total": -178.0}, {"session": "20260830_145230", "kill": 0, "assist": 1, "died": 1, "total": -21.0}, {"session": "20260830_150449", "kill": 0, "assist": 2, "died": 1, "total": -29.0}, {"session": "20260830_152055", "kill": 1, "assist": 3, "died": 3, "total": -83.0}, {"session": "20260830_161622", "kill": 0, "assist": 4, "died": 17, "total": -696.0}, {"session": "20260830_213758", "kill": 0, "assist": 0, "died": 2, "total": -107.0}, {"session": "20260830_214233", "kill": 0, "assist": 0, "died": 2, "total": -108.0}, {"session": "20260830_214602", "kill": 0, "assist": 2, "died": 20, "total": -787.0}, {"session": "20260831_144437", "kill": 0, "assist": 5, "died": 11, "total": -405.0}, {"session": "20260831_162427", "kill": 0, "assist": 8, "died": 37, "total": -1650.0}];
+const abs = [{"攻击": 15.0, "生存": 100, "支援": 0, "推进": 0, "安全": 9.999999999999998}, {"攻击": 31.499999999999993, "生存": 20.0, "支援": 100, "推进": 100, "安全": 39.0}, {"攻击": 0.0, "生存": 20.0, "支援": 100, "推进": 100, "安全": 39.0}, {"攻击": 10.5, "生存": 50.0, "支援": 100, "推进": 100, "安全": 38.0}, {"攻击": 21.0, "生存": 50.0, "支援": 100, "推进": 100, "安全": 37.0}, {"攻击": 46.49999999999999, "生存": 25.0, "支援": 100, "推进": 100, "安全": 39.0}, {"攻击": 42.0, "生存": 5.6, "支援": 100, "推进": 100, "安全": 39.0}, {"攻击": 0.0, "生存": 33.3, "支援": 100, "推进": 100, "安全": 36.5}, {"攻击": 0.0, "生存": 33.3, "支援": 100, "推进": 100, "安全": 41.5}, {"攻击": 21.0, "生存": 4.8, "支援": 100, "推进": 100, "安全": 84.0}, {"攻击": 52.5, "生存": 8.3, "支援": 100, "推进": 100, "安全": 72.0}, {"攻击": 84.0, "生存": 2.6, "支援": 100, "推进": 100, "安全": 100}];
+function radar(canvasId, vals){
+  const c=document.getElementById(canvasId); if(!c) return;
+  const ctx=c.getContext('2d'); const keys=Object.keys(vals);
+  ctx.clearRect(0,0,220,220); ctx.strokeStyle='#888'; ctx.fillStyle='#e6edf3';
+  const cx=110,cy=110,R=80;
+  // grid
+  for(let g=1;g<=4;g++){ctx.beginPath();
+    for(let k=0;k<=keys.length;k++){const a=-Math.PI/2+k*2*Math.PI/keys.length;
+      const r=R*g/4; ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));}
+    ctx.stroke();}
+  // axes+labels
+  for(let k=0;k<keys.length;k++){const a=-Math.PI/2+k*2*Math.PI/keys.length;
+    ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+R*Math.cos(a),cy+R*Math.sin(a));ctx.stroke();
+    ctx.fillText(keys[k],cx+(R+12)*Math.cos(a)-8,cy+(R+12)*Math.sin(a)+4);}
+  // polygon
+  ctx.beginPath();
+  for(let k=0;k<keys.length;k++){const a=-Math.PI/2+k*2*Math.PI/keys.length;
+    const r=R*(vals[keys[k]]/100); ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));}
+  ctx.closePath(); ctx.fillStyle='rgba(88,166,255,0.4)'; ctx.fill();
+  ctx.strokeStyle='#58a6ff'; ctx.lineWidth=2; ctx.stroke();
+}
+reps.forEach((_,i)=>radar('radar'+i,abs[i]));
+// 对比
+const last=reps[reps.length-1]; const before=reps.slice(0,-1);
+const cmp=document.getElementById('compare');
+if(last&&before.length){
+  const avgK=before.reduce((a,r)=>a+r.kill,0)/before.length;
+  const avgD=before.reduce((a,r)=>a+r.died,0)/before.length;
+  const avgT=before.reduce((a,r)=>a+r.total,0)/before.length;
+  cmp.innerHTML=`<p class="stat">最近局 <b>${last.session}</b> 击杀${last.kill}(avg ${avgK.toFixed(1)}) 死亡${last.died}(avg ${avgD.toFixed(1)}) 总分${last.total}(avg ${avgT.toFixed(1)})</p>
+  <p class="stat">击杀: <span class="${last.kill>=avgK?'diff-up':'diff-down'}">${last.kill>=avgK?'进步':'退步'}</span> |
+  死亡: <span class="${last.died<=avgD?'diff-up':'diff-down'}">${last.died<=avgD?'进步':'退步'}</span> |
+  总分: <span class="${last.total>=avgT?'diff-up':'diff-down'}">${last.total>=avgT?'进步':'退步'}</span></p>`;
+}else{ cmp.innerHTML='<p class="stat">暂无对比数据</p>'; }
+</script>
+<p style="color:#8b949e">数据源: data/selfplay/*.jsonl (每步状态+操作+得分) | 进化策略: configs/evolved_policy.json</p>
 </body></html>
